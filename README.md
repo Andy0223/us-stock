@@ -212,6 +212,49 @@ data/inbox/firstrade/
 - `market_dashboard_YYYYMMDD.csv`
 - `sector_scores_YYYYMMDD.csv`
 - `options_review_YYYYMMDD.csv`
+- `earnings_calendar_YYYYMMDD.csv`
+- `closed_loop_radar_YYYYMMDD.csv`
+
+## Earnings calendar
+
+盤前/盤後會自動讀取 AlphaLab 財報行事曆：
+
+- 盤前顯示今日盤前/盤後財報、持股與候選股近期財報。
+- 盤後顯示下一個有財報的盤前清單、追蹤標的財報。
+- 財報只作為風險與催化提醒；財報前預設不追高，財報後才看價格與量能確認。
+
+## AI-driven closed loop
+
+每日策略現在會走一個輕量閉環：
+
+1. 讀取最近一次 `event_study_factor_lift_*.csv` 的歷史有效因子。
+2. 把當天全市場 scan 的候選股套入這些因子，產生 `closed_loop_radar_YYYYMMDD.csv`。
+3. 盤前報告顯示「AI 閉環雷達」，只做早期提醒，不跳過現金、融資、停損與不追價規則。
+4. 盤後報告顯示「AI 閉環回饋」，檢討 watchlist 觸發/錯過、該買未買、該賣未賣。
+5. 盤後會把閉環雷達的趨勢型標的寫入下一個美股交易日的 watchlist。
+
+大型 event study 不會每天跑；需要更新歷史因子時再手動重跑下一節的研究腳本。
+
+## Swing rally event study
+
+歷史波段大漲因子研究不會放進每日 cron。手動執行：
+
+```bash
+./.venv/bin/python scripts/run_event_study.py \
+  --as-of 2026-07-17 \
+  --lookback-days 1600 \
+  --max-symbols 1000 \
+  --selection-scores outputs/candidate_scores_20260717.csv
+```
+
+預設定義為：未來 60 個交易日最大漲幅至少 30%，且相對 SPY 多 15%。輸出：
+
+- `event_study_report_YYYYMMDD.md`
+- `event_study_factor_lift_YYYYMMDD.csv`
+- `event_study_sector_summary_YYYYMMDD.csv`
+- `event_study_regime_summary_YYYYMMDD.csv`
+- `event_study_events_YYYYMMDD.csv`
+- `event_study_current_factor_watchlist_YYYYMMDD.csv`
 
 ## Notes
 

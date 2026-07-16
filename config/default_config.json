@@ -99,6 +99,13 @@
     "max_symbols": 14,
     "max_items_per_symbol": 2
   },
+  "earnings_calendar": {
+    "enabled": true,
+    "url": "https://www.alphalab.site/earnings",
+    "lookahead_days": 14,
+    "max_rows": 80,
+    "timeout_seconds": 20
+  },
   "watchlist": {
     "enabled": true,
     "path": "data/watchlist_next_day.csv"
@@ -118,6 +125,34 @@
     "high_iv_threshold": 0.65,
     "max_alerts": 8,
     "pause_seconds": 0.05
+  },
+  "event_study": {
+    "lookback_days": 1600,
+    "horizon_days": 60,
+    "min_forward_return": 0.3,
+    "min_forward_excess_return": 0.15,
+    "min_avg_dollar_volume": 25000000,
+    "sample_step_days": 5,
+    "max_symbols": 1000,
+    "selection_scores_path": "outputs/candidate_scores_20260717.csv"
+  },
+  "closed_loop": {
+    "enabled": true,
+    "factor_lift_glob": "event_study_factor_lift_*.csv",
+    "min_factor_lift": 1.2,
+    "min_factor_events": 100,
+    "min_actionability_score": 80.0,
+    "min_close": 5.0,
+    "active_allowed_categories": ["A", "B", "D", "E"],
+    "active_min_volume_ratio_20d": 0.35,
+    "include_speculative": true,
+    "speculative_min_volume_ratio_20d": 0.5,
+    "max_trend_items": 8,
+    "max_speculative_items": 4,
+    "max_sector_items": 6,
+    "max_all_items": 30,
+    "watchlist_enabled": true,
+    "watchlist_max_rows": 6
   },
   "risk": {
     "red_vix": 25.0,

@@ -72,6 +72,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Wrote candidates: {result.candidates_path}")
     if result.options_review_path:
         print(f"Wrote options review: {result.options_review_path}")
+    if result.earnings_calendar_path:
+        print(f"Wrote earnings calendar: {result.earnings_calendar_path}")
+    if result.closed_loop_radar_path:
+        print(f"Wrote closed-loop radar: {result.closed_loop_radar_path}")
     print(f"Provider: {result.report.provider_status}")
     print(f"Telegram sent: {result.telegram_sent}")
     if result.telegram_error:

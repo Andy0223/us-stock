@@ -73,7 +73,9 @@ def build_prompt(strategy_text: str, context: dict[str, Any], mode: str) -> str:
         "6. 如果任務是盤後覆盤，必須明確檢討該買未買、該賣未賣、該加碼未加、異常漲跌、產業輪動與 news_review 中的消息提醒。\n"
         "7. 融資不是絕對禁止；必須依 context.market_state.margin_policy 判斷。只有 green 風險燈號、A 類標的、未超過負現金上限、且非追高時，才可討論小額受控融資。\n"
         "8. options_review 是免費 yfinance 期權鏈摘要，只能當確認/警訊，不能當成完整 options flow 或內線訊號。\n"
-        "9. 不得使用保證獲利、必漲、一定會漲、無風險等字眼。\n\n"
+        "9. closed_loop 來自歷史 event study 因子與每日 scan 的閉環雷達；可用於排序與提醒，但不得跳過風控或把高波動事件型當成穩健買點。\n"
+        "10. earnings_calendar 來自 AlphaLab 公開財報日曆，只能當財報風險與催化提醒；日期可能變動，不得把財報前事件直接當成買進理由。\n"
+        "11. 不得使用保證獲利、必漲、一定會漲、無風險等字眼。\n\n"
         f"JSON context:\n{context_json}"
     )
 
@@ -206,6 +208,8 @@ def fallback_report(context: dict[str, Any], mode: str, provider_status: str) ->
     candidates = context.get("top_candidates", [])
     options = context.get("options_review", {})
     watchlist = context.get("watchlist_review", {})
+    closed_loop = context.get("closed_loop", {})
+    earnings = context.get("earnings_calendar", {})
     warnings = context.get("warnings", [])
     cash_value = _float_or_none(portfolio.get("cash_value"))
     negative_cash = cash_value is not None and cash_value < 0
@@ -231,6 +235,12 @@ def fallback_report(context: dict[str, Any], mode: str, provider_status: str) ->
         "",
         "[昨日追蹤清單]",
         *watchlist_review_lines(watchlist),
+        "",
+        "[AI 閉環雷達]",
+        *closed_loop_premarket_lines(closed_loop),
+        "",
+        "[財報風險]",
+        *earnings_premarket_lines(earnings),
         "",
         "[持股處理]",
     ]
@@ -284,6 +294,8 @@ def fallback_after_close_report(context: dict[str, Any], provider_status: str) -
     news = context.get("news_review", {})
     options = context.get("options_review", {})
     watchlist_created = context.get("watchlist_created", {})
+    closed_loop = context.get("closed_loop", {})
+    earnings = context.get("earnings_calendar", {})
     warnings = context.get("warnings", [])
 
     missed_buys = review.get("missed_buy_candidates", []) or []
@@ -337,6 +349,12 @@ def fallback_after_close_report(context: dict[str, Any], provider_status: str) -
         lines.append("大跌：" + "；".join(_ticker_move(row) for row in big_losers[:5]))
     if not sector_up and not sector_down and not big_gainers and not big_losers:
         lines.append("沒有達到設定門檻的大漲跌或產業輪動。")
+
+    lines.extend(["", "[AI 閉環回饋]"])
+    lines.extend(closed_loop_after_close_lines(closed_loop))
+
+    lines.extend(["", "[財報風險與催化]"])
+    lines.extend(earnings_after_close_lines(earnings))
 
     lines.extend(["", "[新聞與消息]"])
     if news_items:
@@ -538,6 +556,7 @@ def watchlist_created_lines(created: dict[str, Any]) -> list[str]:
     sell = [row for row in items if row.get("action") == "sell_or_reduce"]
     buy = [row for row in items if row.get("action") in {"buy_watch", "add_watch"}]
     news = [row for row in items if "news" in str(row.get("action", ""))]
+    factors = [row for row in items if row.get("action") == "factor_watch"]
     lines = [f"{valid_for} 共 {len(items)} 檔"]
     if sell:
         lines.append("先處理：" + "；".join(watchlist_plan_line(row) for row in sell[:4]))
@@ -545,7 +564,122 @@ def watchlist_created_lines(created: dict[str, Any]) -> list[str]:
         lines.append("買/加追蹤：" + "；".join(watchlist_plan_line(row) for row in buy[:4]))
     if news:
         lines.append("消息追蹤：" + "；".join(str(row.get("ticker", "")) for row in news[:6]))
+    if factors:
+        lines.append("閉環雷達：" + "；".join(watchlist_plan_line(row) for row in factors[:4]))
     return lines
+
+
+def closed_loop_premarket_lines(loop: dict[str, Any]) -> list[str]:
+    if not isinstance(loop, dict) or not loop.get("enabled"):
+        return ["閉環未啟用或尚無事件研究因子。"]
+    radar = loop.get("radar", {}) if isinstance(loop.get("radar"), dict) else {}
+    learning = loop.get("learning", {}) if isinstance(loop.get("learning"), dict) else {}
+    feedback = loop.get("feedback", {}) if isinstance(loop.get("feedback"), dict) else {}
+    active = radar.get("active_trend", []) or []
+    speculative = radar.get("speculative_events", []) or []
+    source_status = radar.get("source_status", {}) if isinstance(radar.get("source_status"), dict) else {}
+
+    lines = []
+    top_factors = learning.get("top_factors", []) or []
+    if top_factors:
+        lines.append("有效因子：" + "；".join(closed_loop_factor_line(row) for row in top_factors[:3]))
+    lines.append(
+        f"雷達 {source_status.get('radar_rows', 0)} 檔｜候選 {source_status.get('candidate_rows', 0)}｜{feedback.get('next_action', '維持原風控')}"
+    )
+    if active:
+        lines.append("趨勢型：" + "；".join(closed_loop_symbol_line(row) for row in active[:4]))
+    else:
+        lines.append("趨勢型：沒有乾淨早期訊號。")
+    if speculative:
+        lines.append("高波動只小倉：" + "；".join(closed_loop_symbol_line(row) for row in speculative[:3]))
+    return lines
+
+
+def closed_loop_after_close_lines(loop: dict[str, Any]) -> list[str]:
+    if not isinstance(loop, dict) or not loop.get("enabled"):
+        return ["閉環未啟用或尚無事件研究因子。"]
+    radar = loop.get("radar", {}) if isinstance(loop.get("radar"), dict) else {}
+    feedback = loop.get("feedback", {}) if isinstance(loop.get("feedback"), dict) else {}
+    active = radar.get("active_trend", []) or []
+    sector = radar.get("sector_rotation", []) or []
+    lines = [
+        (
+            f"昨日任務 觸發 {feedback.get('watchlist_triggered', 0)} / 錯過 {feedback.get('watchlist_missed', 0)}"
+            f"｜該買未買 {feedback.get('missed_buy_count', 0)}｜該賣未賣 {feedback.get('missed_sell_count', 0)}"
+        ),
+        f"修正方向：{feedback.get('next_action', '維持原風控')}",
+    ]
+    if sector:
+        lines.append("產業輪動：" + "；".join(closed_loop_symbol_line(row) for row in sector[:4]))
+    if active:
+        lines.append("寫入明日雷達：" + "；".join(closed_loop_symbol_line(row) for row in active[:4]))
+    else:
+        lines.append("明日雷達：沒有乾淨趨勢型標的。")
+    return lines
+
+
+def closed_loop_factor_line(row: dict[str, Any]) -> str:
+    return f"{row.get('label', row.get('factor', ''))} lift {_num(row.get('lift'))}"
+
+
+def closed_loop_symbol_line(row: dict[str, Any]) -> str:
+    return (
+        f"{row.get('ticker')} {short_text(row.get('setup_type'), 8)}"
+        f"｜分 {_num(row.get('actionability_score'))}"
+        f"｜20D相對 {_pct(row.get('relative_return_20d'))}"
+        f"｜量比 {_num(row.get('volume_ratio_20d'))}"
+    )
+
+
+def earnings_premarket_lines(calendar: dict[str, Any]) -> list[str]:
+    if not isinstance(calendar, dict) or not calendar.get("enabled"):
+        return ["財報日曆未啟用或抓取失敗。"]
+    today = calendar.get("today", []) or []
+    watched = calendar.get("watched", []) or []
+    high_attention = calendar.get("high_attention", []) or []
+    status = calendar.get("source_status", {}) if isinstance(calendar.get("source_status"), dict) else {}
+
+    lines = [f"已讀 AlphaLab｜近期 {status.get('upcoming_rows', 0)} 檔｜追蹤命中 {status.get('watched_rows', 0)} 檔"]
+    before_open = [row for row in today if row.get("release_time") == "before_open"]
+    after_close = [row for row in today if row.get("release_time") == "after_close"]
+    if before_open:
+        lines.append("今日盤前：" + "；".join(earnings_row_line(row, include_date=False) for row in before_open[:6]))
+    if after_close:
+        lines.append("今日盤後：" + "；".join(earnings_row_line(row, include_date=False) for row in after_close[:6]))
+    if watched:
+        lines.append("持股/候選近期財報：" + "；".join(earnings_row_line(row) for row in watched[:6]))
+    elif high_attention:
+        lines.append("市場焦點近期財報：" + "；".join(earnings_row_line(row) for row in high_attention[:6]))
+    else:
+        lines.append("持股與候選股近期沒有命中財報日曆。")
+    lines.append("規則：財報前不追高；財報後等價格/量能確認再納入買點。")
+    return lines
+
+
+def earnings_after_close_lines(calendar: dict[str, Any]) -> list[str]:
+    if not isinstance(calendar, dict) or not calendar.get("enabled"):
+        return ["財報日曆未啟用或抓取失敗。"]
+    today = calendar.get("today", []) or []
+    next_before_open = calendar.get("next_before_open", []) or calendar.get("tomorrow", []) or []
+    watched = calendar.get("watched", []) or []
+    today_after = [row for row in today if row.get("release_time") == "after_close"]
+    tomorrow_before = [row for row in next_before_open if row.get("release_time") == "before_open"]
+    lines = []
+    if today_after:
+        lines.append("今晚盤後：" + "；".join(earnings_row_line(row, include_date=False) for row in today_after[:6]))
+    if tomorrow_before:
+        lines.append("下個交易日前盤前：" + "；".join(earnings_row_line(row) for row in tomorrow_before[:6]))
+    if watched:
+        lines.append("追蹤標的財報：" + "；".join(earnings_row_line(row) for row in watched[:8]))
+    if not lines:
+        lines.append("近期持股/候選沒有命中財報日曆。")
+    lines.append("閉環處理：若財報造成跳空，隔日只看守住/失守關鍵價，不在財報前放大部位。")
+    return lines
+
+
+def earnings_row_line(row: dict[str, Any], include_date: bool = True) -> str:
+    prefix = f"{row.get('date')} " if include_date else ""
+    return f"{prefix}{row.get('ticker')} {row.get('release_time_label', '')}"
 
 
 def watchlist_item_line(row: dict[str, Any]) -> str:
@@ -572,6 +706,7 @@ def watchlist_action_label(value: Any) -> str:
         "buy_watch": "買進",
         "risk_news_watch": "風險消息",
         "momentum_news_watch": "動能消息",
+        "factor_watch": "閉環雷達",
     }
     return labels.get(str(value), str(value or "追蹤"))
 

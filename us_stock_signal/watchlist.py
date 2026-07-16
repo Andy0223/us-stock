@@ -108,6 +108,9 @@ def evaluate_watchlist(
             elif action in {"momentum_news_watch"}:
                 status = "waiting"
                 note = "只做消息/延續性追蹤，不直接追價。"
+            elif action in {"factor_watch"}:
+                status = "waiting"
+                note = "閉環早期因子追蹤，需等價格觸發或盤後確認。"
         else:
             status = "no_price"
             note = "沒有價格資料。"
@@ -189,6 +192,8 @@ def reason_for(action: str, row: dict[str, Any]) -> str:
         return str(row.get("reason") or "盤後列為該買未買追蹤。")
     if action == "risk_news_watch":
         return "單日大跌，隔日追蹤是否有消息或風險延續。"
+    if action == "factor_watch":
+        return str(row.get("reason") or "閉環早期因子雷達追蹤。")
     return "單日大漲，隔日追蹤是否有消息或延續性。"
 
 

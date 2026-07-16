@@ -226,35 +226,35 @@ def fallback_report(context: dict[str, Any], mode: str, provider_status: str) ->
     ][:5]
 
     lines = [
-        f"美股盤前快報｜{as_of}",
-        f"結論：{premarket_conclusion(negative_cash, margin_status, category_a, market_state)}",
+        f"🇺🇸 美股盤前｜{as_of}",
+        f"🎯 {premarket_conclusion(negative_cash, margin_status, category_a, market_state)}",
         "",
-        "[盤勢圖表]",
-        market_chart_line(market_state),
-        ma50_chart_line(market_state),
-        cash_chart_line(portfolio, market_state, margin_status),
+        "📊 盤勢",
+        f"├ {market_chart_line(market_state)}",
+        f"├ {ma50_chart_line(market_state)}",
+        f"└ {cash_chart_line(portfolio, market_state, margin_status)}",
         "",
-        "[昨日追蹤清單]",
+        "🧾 昨日追蹤",
         *watchlist_review_lines(watchlist),
         "",
-        "[AI 閉環雷達]",
+        "🧠 AI 閉環雷達",
         *closed_loop_premarket_lines(closed_loop),
         "",
-        "[財報風險]",
+        "📅 財報風險",
         *earnings_premarket_lines(earnings),
         "",
-        "[持股處理]",
+        "💼 持股處理",
     ]
     if reduce_list:
-        lines.append("先處理：" + "；".join(compact_holding_action(row) for row in reduce_list))
+        lines.append("⚠️ 先處理：" + "；".join(compact_holding_action(row) for row in reduce_list))
     elif holdings:
-        lines.append("沒有強制減碼；照停損價管理。")
+        lines.append("✅ 無強制減碼；照停損價管理。")
     else:
-        lines.append("尚未提供 holdings.csv，無法做持股優先判斷。")
+        lines.append("⚠️ 尚未提供 holdings.csv，無法做持股優先判斷。")
     if holdings:
-        lines.extend(compact_holdings_table(holdings[:8]))
+        lines.extend(compact_holdings_table(holdings[:6]))
 
-    lines.extend(["", "[今日可買 / 觀察]"])
+    lines.extend(["", "🟢 今日可買 / 觀察"])
     if category_a:
         for row in category_a:
             cash_note = ""
@@ -262,28 +262,28 @@ def fallback_report(context: dict[str, Any], mode: str, provider_status: str) ->
                 cash_note = "｜受控融資可小筆" if margin_status["can_add_margin"] else "｜現金為負，先觀察"
             lines.append(compact_candidate(row, prefix="可買", suffix=cash_note))
     else:
-        lines.append("可買：沒有 A 類。今天不降低標準。")
+        lines.append("可買：沒有 A 類，今天不降低標準。")
     if wait_list:
-        lines.append("觀察名單：")
+        lines.append("👀 觀察名單")
         for row in wait_list:
             lines.append(compact_candidate(row, prefix="觀察"))
     if no_chase:
-        lines.append("不追高：" + "；".join(f"{row.get('ticker')} > {_price(row.get('no_chase_above'))}" for row in no_chase[:4]))
+        lines.append("🚫 不追高：" + "；".join(f"{row.get('ticker')} > {_price(row.get('no_chase_above'))}" for row in no_chase[:4]))
 
-    lines.extend(["", "[期權確認]"])
+    lines.extend(["", "🎛️ 期權確認"])
     lines.extend(options_summary_lines(options, compact=True))
 
-    lines.extend(["", "[風控與劇本]"])
+    lines.extend(["", "🛡️ 風控與劇本"])
     lines.append(f"現金 {_money(portfolio.get('cash_value'))}｜現金比 {_pct(portfolio.get('cash_weight'))}｜目標現金 {market_state.get('cash_target', 'n/a')}")
     lines.append(f"新增曝險上限 {_pct(market_state.get('new_exposure_limit'))}｜單檔上限 {_pct(market_state.get('single_name_limit'))}")
     lines.append(margin_policy_line(margin_status))
-    lines.append("上漲：不追跳空，等回測守住再加。")
-    lines.append("下跌：跌破停損或市場轉黃/橘/紅，取消加碼。")
+    lines.append("⬆️ 上漲：不追跳空，等回測守住再加。")
+    lines.append("⬇️ 下跌：跌破停損或市場轉黃/橘/紅，取消加碼。")
 
     if warnings:
-        lines.extend(["", "[資料提醒]"])
+        lines.extend(["", "⚠️ 資料提醒"])
         lines.extend(f"- {clean_warning(warning)}" for warning in warnings[:4])
-    lines.append(f"\n產生方式：{provider_label(provider_status)}")
+    lines.append(f"\n🤖 產生方式：{provider_label(provider_status)}")
     return "\n".join(lines)
 
 
@@ -314,69 +314,69 @@ def fallback_after_close_report(context: dict[str, Any], provider_status: str) -
     margin_status = controlled_margin_status(market_state, portfolio)
 
     lines = [
-        f"美股盤後覆盤｜{as_of}",
-        f"結論：{after_close_conclusion(negative_cash, margin_status, missed_sells, missed_buys, missed_adds)}",
+        f"🇺🇸 美股盤後｜{as_of}",
+        f"🎯 {after_close_conclusion(negative_cash, margin_status, missed_sells, missed_buys, missed_adds)}",
         "",
-        "[收盤圖表]",
-        market_chart_line(market_state),
-        ma50_chart_line(market_state),
-        cash_chart_line(portfolio, market_state, margin_status),
+        "📊 收盤儀表板",
+        f"├ {market_chart_line(market_state)}",
+        f"├ {ma50_chart_line(market_state)}",
+        f"└ {cash_chart_line(portfolio, market_state, margin_status)}",
     ]
 
-    lines.extend(["", "[今日實際交易]"])
+    lines.extend(["", "🧾 今日實際交易"])
     lines.extend(trade_log_lines(trade_log))
 
-    lines.extend(["", "[明日優先順序]"])
+    lines.extend(["", "✅ 明日優先順序"])
     if missed_sells:
-        lines.append("1. 先降風險：" + "；".join(compact_holding_action(row) for row in missed_sells[:5]))
+        lines.append("1. ⚠️ 先降風險：" + "；".join(compact_holding_action(row) for row in missed_sells[:4]))
     elif negative_cash:
-        lines.append("1. 先降融資：現金為負，新增買進先暫停。")
+        lines.append("1. ⚠️ 先降融資：現金為負，新增買進先暫停。")
     else:
-        lines.append("1. 沒有強制賣出訊號，照停損管理。")
+        lines.append("1. ✅ 沒有強制賣出訊號，照停損管理。")
     if missed_buys:
         action_word = "觀察" if negative_cash and not margin_status["can_add_margin"] else "檢討"
-        lines.append(f"2. {action_word}錯過買點：" + "；".join(compact_candidate(row, prefix="") for row in missed_buys[:4]))
+        lines.append(f"2. 👀 {action_word}錯過買點：" + "；".join(compact_candidate(row, prefix="") for row in missed_buys[:3]))
     else:
-        lines.append("2. 沒有明確該買未買名單。")
+        lines.append("2. ✅ 沒有明確該買未買名單。")
     if missed_adds and not negative_cash:
-        lines.append("3. 可加碼：" + "；".join(compact_holding_action(row) for row in missed_adds[:4]))
+        lines.append("3. 🟢 可加碼：" + "；".join(compact_holding_action(row) for row in missed_adds[:4]))
     else:
-        lines.append("3. 不主動加碼，等更乾淨買點。")
+        lines.append("3. ⏸️ 不主動加碼，等更乾淨買點。")
 
-    lines.extend(["", "[產業與異常波動]"])
+    lines.extend(["", "🏭 產業與異常波動"])
     if sector_up:
-        lines.append("強勢產業：" + "；".join(compact_sector_line(row) for row in sector_up[:3]))
+        lines.append("🔥 強勢：" + "；".join(compact_sector_line(row) for row in sector_up[:3]))
     if sector_down:
-        lines.append("弱勢產業：" + "；".join(compact_sector_line(row) for row in sector_down[:3]))
+        lines.append("🧊 弱勢：" + "；".join(compact_sector_line(row) for row in sector_down[:3]))
     if big_gainers:
-        lines.append("大漲：" + "；".join(_ticker_move(row) for row in big_gainers[:5]))
+        lines.append("🚀 大漲：" + "；".join(_ticker_move(row) for row in big_gainers[:3]))
     if big_losers:
-        lines.append("大跌：" + "；".join(_ticker_move(row) for row in big_losers[:5]))
+        lines.append("🔻 大跌：" + "；".join(_ticker_move(row) for row in big_losers[:3]))
     if not sector_up and not sector_down and not big_gainers and not big_losers:
         lines.append("沒有達到設定門檻的大漲跌或產業輪動。")
 
-    lines.extend(["", "[AI 閉環回饋]"])
+    lines.extend(["", "🧠 AI 閉環回饋"])
     lines.extend(closed_loop_after_close_lines(closed_loop))
 
-    lines.extend(["", "[財報風險與催化]"])
+    lines.extend(["", "📅 財報風險與催化"])
     lines.extend(earnings_after_close_lines(earnings))
 
-    lines.extend(["", "[新聞與消息]"])
+    lines.extend(["", "📰 新聞與消息"])
     if news_items:
-        for item in news_items[:5]:
+        for item in news_items[:3]:
             lines.append(compact_news_line(item))
     else:
         requested = source_status.get("symbols_requested", 0)
         returned = source_status.get("symbols_returned", 0)
         lines.append(f"免費新聞源沒有回傳可用標題｜returned {returned}/{requested}。")
 
-    lines.extend(["", "[期權檢查]"])
+    lines.extend(["", "🎛️ 期權檢查"])
     lines.extend(options_summary_lines(options, compact=True))
 
-    lines.extend(["", "[已建立明日追蹤清單]"])
+    lines.extend(["", "🗓️ 明日追蹤清單"])
     lines.extend(watchlist_created_lines(watchlist_created))
 
-    lines.extend(["", "[風控明日劇本]"])
+    lines.extend(["", "🛡️ 明日風控劇本"])
     lines.append(f"現金 {_money(portfolio.get('cash_value'))}｜股票 {_money(portfolio.get('stock_value'))}｜總權益 {_money(portfolio.get('total_equity'))}")
     lines.append(margin_policy_line(margin_status))
     if negative_cash and not margin_status["can_add_margin"]:
@@ -388,11 +388,11 @@ def fallback_after_close_report(context: dict[str, Any], provider_status: str) -
 
     scope_note = review.get("scope_note")
     if scope_note:
-        lines.extend(["", "[範圍提醒]", f"- {clean_scope_note(scope_note)}"])
+        lines.extend(["", "📌 範圍提醒", f"- {clean_scope_note(scope_note)}"])
     if warnings:
-        lines.extend(["", "[資料提醒]"])
+        lines.extend(["", "⚠️ 資料提醒"])
         lines.extend(f"- {clean_warning(warning)}" for warning in warnings[:4])
-    lines.append(f"\n產生方式：{provider_label(provider_status)}")
+    lines.append(f"\n🤖 產生方式：{provider_label(provider_status)}")
     return "\n".join(lines)
 
 
@@ -438,17 +438,17 @@ def trade_log_lines(trade_log: dict[str, Any]) -> list[str]:
         return [message or "今日沒有交易紀錄。"]
 
     lines = [
-        f"買進 {_money(trade_log.get('buy_value'))}｜賣出 {_money(trade_log.get('sell_value'))}｜淨現金流 {_money(trade_log.get('net_cash_flow'))}"
+        f"💰 買 {_money(trade_log.get('buy_value'))}｜賣 {_money(trade_log.get('sell_value'))}｜淨 {_money(trade_log.get('net_cash_flow'))}"
     ]
     buys = aggregate_trade_rows(rows, "buy")
     sells = aggregate_trade_rows(rows, "sell")
     round_trips = trade_log.get("round_trip_symbols", []) or []
     if buys:
-        lines.append("買進：" + "；".join(format_trade_item(item) for item in buys[:8]))
+        lines.extend(trade_table_lines("🟢 買進 Top", buys[:3]))
     if sells:
-        lines.append("賣出：" + "；".join(format_trade_item(item) for item in sells[:8]))
+        lines.extend(trade_table_lines("🔴 賣出 Top", sells[:3]))
     if round_trips:
-        lines.append("當日來回/換倉：" + "、".join(str(symbol) for symbol in round_trips[:8]))
+        lines.append("🔁 來回/換倉：" + "、".join(str(symbol) for symbol in round_trips[:8]))
     return lines
 
 
@@ -479,6 +479,31 @@ def format_trade_item(item: dict[str, Any]) -> str:
     shares = _float_or_none(item.get("shares")) or 0.0
     share_text = str(int(shares)) if shares.is_integer() else _num(shares)
     return f"{item.get('ticker')} {share_text}@{_price(item.get('avg_price'))}"
+
+
+def trade_table_lines(title: str, items: list[dict[str, Any]]) -> list[str]:
+    rows = []
+    for item in items:
+        shares = _float_or_none(item.get("shares")) or 0.0
+        share_text = str(int(shares)) if shares.is_integer() else _num(shares)
+        rows.append([item.get("ticker", ""), share_text, _price(item.get("avg_price")), _money(item.get("amount"))])
+    return [title, *simple_table(["代號", "股", "均價", "金額"], rows)]
+
+
+def simple_table(headers: list[str], rows: list[list[Any]]) -> list[str]:
+    if not rows:
+        return []
+    text_rows = [[short_text(value, 12) for value in row] for row in rows]
+    widths = []
+    for index, header in enumerate(headers):
+        widths.append(max(len(str(header)), *(len(str(row[index])) for row in text_rows)))
+    lines = [
+        " | ".join(str(header).ljust(widths[index]) for index, header in enumerate(headers)),
+        "-+-".join("-" * width for width in widths),
+    ]
+    for row in text_rows:
+        lines.append(" | ".join(str(value).ljust(widths[index]) for index, value in enumerate(row)))
+    return lines
 
 
 def premarket_conclusion(
@@ -543,13 +568,18 @@ def cash_chart_line(portfolio: dict[str, Any], market_state: dict[str, Any], mar
 
 
 def compact_holdings_table(holdings: list[dict[str, Any]]) -> list[str]:
-    lines = ["代號｜動作｜權重｜損益｜停損"]
+    rows = []
     for row in holdings:
-        lines.append(
-            f"{row.get('ticker')}｜{short_text(row.get('action'), 8)}｜{_pct(row.get('portfolio_weight'))}"
-            f"｜{_pct(row.get('unrealized_pnl_pct'))}｜{_price(row.get('stop_loss'))}"
+        rows.append(
+            [
+                row.get("ticker", ""),
+                short_text(row.get("action"), 8),
+                _pct(row.get("portfolio_weight")),
+                _pct(row.get("unrealized_pnl_pct")),
+                _price(row.get("stop_loss")),
+            ]
         )
-    return lines
+    return simple_table(["代號", "動作", "權重", "損益", "停損"], rows)
 
 
 def compact_holding_action(row: dict[str, Any]) -> str:
@@ -560,24 +590,25 @@ def compact_holding_action(row: dict[str, Any]) -> str:
 
 
 def compact_candidate(row: dict[str, Any], prefix: str = "觀察", suffix: str = "") -> str:
-    label = f"{prefix}｜" if prefix else ""
+    icon = "🟢" if prefix == "可買" else "👀" if prefix == "觀察" else "•"
+    label = f"{icon} " if prefix else "• "
     return (
-        f"{label}{row.get('ticker')} {row.get('category', '')} 分數 {_num(row.get('total_score_100'))}"
-        f"｜進場 {_price(row.get('entry_low'))}-{_price(row.get('entry_high'))}"
-        f"｜不追 {_price(row.get('no_chase_above'))}{suffix}"
+        f"{label}{row.get('ticker')} {row.get('category', '')}{_num(row.get('total_score_100'))}"
+        f"｜買{_price(row.get('entry_low'))}-{_price(row.get('entry_high'))}"
+        f"｜追{_price(row.get('no_chase_above'))}{suffix}"
     )
 
 
 def compact_sector_line(row: dict[str, Any]) -> str:
-    sector = short_text(row.get("sector"), 14)
+    sector = short_text(row.get("sector"), 10)
     return f"{sector} 1D {_pct(row.get('avg_return_1d'))}｜代表 {row.get('top_mover', '')}"
 
 
 def compact_news_line(item: dict[str, Any]) -> str:
     ticker = item.get("ticker") or "n/a"
-    publisher = short_text(item.get("publisher"), 12)
-    title = short_text(item.get("title"), 72)
-    return f"{ticker}｜{publisher}｜{title}"
+    publisher = short_text(item.get("publisher"), 10)
+    title = short_text(item.get("title"), 50)
+    return f"• {ticker}｜{publisher}｜{title}"
 
 
 def watchlist_review_lines(review: dict[str, Any]) -> list[str]:
@@ -593,16 +624,16 @@ def watchlist_review_lines(review: dict[str, Any]) -> list[str]:
     waiting = review.get("still_waiting", []) or []
     no_price = review.get("no_price", []) or []
     lines = [
-        f"任務 {active_count}｜觸發 {len(triggered)}｜錯過 {len(missed)}｜等待 {len(waiting)}｜無價 {len(no_price)}",
+        f"📌 任務 {active_count}｜✅ {len(triggered)}｜⚠️ {len(missed)}｜⏳ {len(waiting)}｜❔ {len(no_price)}",
     ]
     if triggered:
-        lines.append("已觸發：" + "；".join(watchlist_item_line(row) for row in triggered[:4]))
+        lines.append("✅ 已觸發：" + "；".join(watchlist_item_line(row) for row in triggered[:4]))
     if missed:
-        lines.append("已錯過：" + "；".join(watchlist_item_line(row) for row in missed[:4]))
+        lines.append("⚠️ 已錯過：" + "；".join(watchlist_item_line(row) for row in missed[:4]))
     if waiting:
-        lines.append("等待：" + "；".join(watchlist_item_line(row) for row in waiting[:4]))
+        lines.append("⏳ 等待：" + "；".join(watchlist_item_line(row) for row in waiting[:4]))
     if no_price:
-        lines.append("無價：" + "；".join(str(row.get("ticker", "")) for row in no_price[:8]))
+        lines.append("❔ 無價：" + "；".join(str(row.get("ticker", "")) for row in no_price[:8]))
     return lines
 
 
@@ -617,15 +648,15 @@ def watchlist_created_lines(created: dict[str, Any]) -> list[str]:
     buy = [row for row in items if row.get("action") in {"buy_watch", "add_watch"}]
     news = [row for row in items if "news" in str(row.get("action", ""))]
     factors = [row for row in items if row.get("action") == "factor_watch"]
-    lines = [f"{valid_for} 共 {len(items)} 檔"]
+    lines = [f"📅 {valid_for}｜共 {len(items)} 檔"]
     if sell:
-        lines.append("先處理：" + "；".join(watchlist_plan_line(row) for row in sell[:4]))
+        lines.append("⚠️ 先處理：" + "；".join(watchlist_plan_line(row) for row in sell[:3]))
     if buy:
-        lines.append("買/加追蹤：" + "；".join(watchlist_plan_line(row) for row in buy[:4]))
+        lines.append("🟢 買/加：" + "；".join(watchlist_plan_line(row) for row in buy[:3]))
     if news:
-        lines.append("消息追蹤：" + "；".join(str(row.get("ticker", "")) for row in news[:6]))
+        lines.append("📰 消息：" + "；".join(str(row.get("ticker", "")) for row in news[:4]))
     if factors:
-        lines.append("閉環雷達：" + "；".join(watchlist_plan_line(row) for row in factors[:4]))
+        lines.append("🧠 雷達：" + "；".join(watchlist_plan_line(row) for row in factors[:3]))
     return lines
 
 
@@ -642,16 +673,16 @@ def closed_loop_premarket_lines(loop: dict[str, Any]) -> list[str]:
     lines = []
     top_factors = learning.get("top_factors", []) or []
     if top_factors:
-        lines.append("有效因子：" + "；".join(closed_loop_factor_line(row) for row in top_factors[:3]))
+        lines.append("📈 因子：" + "；".join(closed_loop_factor_line(row) for row in top_factors[:3]))
     lines.append(
-        f"雷達 {source_status.get('radar_rows', 0)} 檔｜候選 {source_status.get('candidate_rows', 0)}｜{feedback.get('next_action', '維持原風控')}"
+        f"📡 雷達 {source_status.get('radar_rows', 0)}｜候選 {source_status.get('candidate_rows', 0)}｜{feedback.get('next_action', '維持原風控')}"
     )
     if active:
-        lines.append("趨勢型：" + "；".join(closed_loop_symbol_line(row) for row in active[:4]))
+        lines.append("🟢 趨勢：" + "；".join(closed_loop_symbol_line(row) for row in active[:3]))
     else:
-        lines.append("趨勢型：沒有乾淨早期訊號。")
+        lines.append("趨勢：沒有乾淨早期訊號。")
     if speculative:
-        lines.append("高波動只小倉：" + "；".join(closed_loop_symbol_line(row) for row in speculative[:3]))
+        lines.append("⚡ 高波動：" + "；".join(closed_loop_symbol_line(row) for row in speculative[:2]))
     return lines
 
 
@@ -664,15 +695,15 @@ def closed_loop_after_close_lines(loop: dict[str, Any]) -> list[str]:
     sector = radar.get("sector_rotation", []) or []
     lines = [
         (
-            f"昨日任務 觸發 {feedback.get('watchlist_triggered', 0)} / 錯過 {feedback.get('watchlist_missed', 0)}"
+            f"📌 任務 ✅ {feedback.get('watchlist_triggered', 0)} / ⚠️ {feedback.get('watchlist_missed', 0)}"
             f"｜該買未買 {feedback.get('missed_buy_count', 0)}｜該賣未賣 {feedback.get('missed_sell_count', 0)}"
         ),
-        f"修正方向：{feedback.get('next_action', '維持原風控')}",
+        f"🔧 修正：{feedback.get('next_action', '維持原風控')}",
     ]
     if sector:
-        lines.append("產業輪動：" + "；".join(closed_loop_symbol_line(row) for row in sector[:4]))
+        lines.append("🏭 輪動：" + "；".join(closed_loop_symbol_line(row) for row in sector[:3]))
     if active:
-        lines.append("寫入明日雷達：" + "；".join(closed_loop_symbol_line(row) for row in active[:4]))
+        lines.append("🧠 明日雷達：" + "；".join(closed_loop_symbol_line(row) for row in active[:3]))
     else:
         lines.append("明日雷達：沒有乾淨趨勢型標的。")
     return lines
@@ -684,10 +715,9 @@ def closed_loop_factor_line(row: dict[str, Any]) -> str:
 
 def closed_loop_symbol_line(row: dict[str, Any]) -> str:
     return (
-        f"{row.get('ticker')} {short_text(row.get('setup_type'), 8)}"
-        f"｜分 {_num(row.get('actionability_score'))}"
-        f"｜20D相對 {_pct(row.get('relative_return_20d'))}"
-        f"｜量比 {_num(row.get('volume_ratio_20d'))}"
+        f"{row.get('ticker')} {_num(row.get('actionability_score'))}"
+        f"｜RS20 {_pct(row.get('relative_return_20d'))}"
+        f"｜量{_num(row.get('volume_ratio_20d'))}"
     )
 
 
@@ -699,20 +729,20 @@ def earnings_premarket_lines(calendar: dict[str, Any]) -> list[str]:
     high_attention = calendar.get("high_attention", []) or []
     status = calendar.get("source_status", {}) if isinstance(calendar.get("source_status"), dict) else {}
 
-    lines = [f"已讀 AlphaLab｜近期 {status.get('upcoming_rows', 0)} 檔｜追蹤命中 {status.get('watched_rows', 0)} 檔"]
+    lines = [f"📡 AlphaLab｜近期 {status.get('upcoming_rows', 0)}｜命中 {status.get('watched_rows', 0)}"]
     before_open = [row for row in today if row.get("release_time") == "before_open"]
     after_close = [row for row in today if row.get("release_time") == "after_close"]
     if before_open:
-        lines.append("今日盤前：" + "；".join(earnings_row_line(row, include_date=False) for row in before_open[:6]))
+        lines.append("🌅 今日盤前：" + "；".join(earnings_row_line(row, include_date=False) for row in before_open[:4]))
     if after_close:
-        lines.append("今日盤後：" + "；".join(earnings_row_line(row, include_date=False) for row in after_close[:6]))
+        lines.append("🌙 今日盤後：" + "；".join(earnings_row_line(row, include_date=False) for row in after_close[:4]))
     if watched:
-        lines.append("持股/候選近期財報：" + "；".join(earnings_row_line(row) for row in watched[:6]))
+        lines.append("👀 追蹤：" + "；".join(earnings_row_line(row) for row in watched[:5]))
     elif high_attention:
-        lines.append("市場焦點近期財報：" + "；".join(earnings_row_line(row) for row in high_attention[:6]))
+        lines.append("🔥 焦點：" + "；".join(earnings_row_line(row) for row in high_attention[:5]))
     else:
         lines.append("持股與候選股近期沒有命中財報日曆。")
-    lines.append("規則：財報前不追高；財報後等價格/量能確認再納入買點。")
+    lines.append("規則：財報前不追高；財報後等價量確認。")
     return lines
 
 
@@ -726,14 +756,14 @@ def earnings_after_close_lines(calendar: dict[str, Any]) -> list[str]:
     tomorrow_before = [row for row in next_before_open if row.get("release_time") == "before_open"]
     lines = []
     if today_after:
-        lines.append("今晚盤後：" + "；".join(earnings_row_line(row, include_date=False) for row in today_after[:6]))
+        lines.append("🌙 今晚盤後：" + "；".join(earnings_row_line(row, include_date=False) for row in today_after[:4]))
     if tomorrow_before:
-        lines.append("下個交易日前盤前：" + "；".join(earnings_row_line(row) for row in tomorrow_before[:6]))
+        lines.append("🌅 下個盤前：" + "；".join(earnings_row_line(row) for row in tomorrow_before[:4]))
     if watched:
-        lines.append("追蹤標的財報：" + "；".join(earnings_row_line(row) for row in watched[:8]))
+        lines.append("👀 追蹤：" + "；".join(earnings_row_line(row) for row in watched[:5]))
     if not lines:
         lines.append("近期持股/候選沒有命中財報日曆。")
-    lines.append("閉環處理：若財報造成跳空，隔日只看守住/失守關鍵價，不在財報前放大部位。")
+    lines.append("規則：跳空後只看守住/失守關鍵價，不在財報前放大。")
     return lines
 
 
@@ -756,7 +786,7 @@ def watchlist_plan_line(row: dict[str, Any]) -> str:
     low = _price(row.get("trigger_low"))
     high = _price(row.get("trigger_high"))
     stop = _price(row.get("stop_loss"))
-    return f"{ticker} {action}｜觸發 {low}-{high}｜停損 {stop}"
+    return f"{ticker} {action} {low}-{high}｜停{stop}"
 
 
 def watchlist_action_label(value: Any) -> str:
@@ -836,19 +866,19 @@ def options_summary_lines(options: dict[str, Any], compact: bool = False) -> lis
 
     if bullish:
         formatter = compact_option_line if compact else _option_line
-        lines.append("偏多：" + "；".join(formatter(row) for row in bullish[:4]))
+        lines.append("🟢 偏多：" + "；".join(formatter(row) for row in bullish[:3]))
     if bearish:
         formatter = compact_option_line if compact else _option_line
-        lines.append("偏空：" + "；".join(formatter(row) for row in bearish[:4]))
+        lines.append("🔴 偏空：" + "；".join(formatter(row) for row in bearish[:3]))
     if high_iv:
-        lines.append("IV 高：" + "；".join(_option_iv_line(row) for row in high_iv[:4]))
+        lines.append("⚡ IV 高：" + "；".join(_option_iv_line(row) for row in high_iv[:3]))
     if not lines:
         requested = status.get("symbols_requested", 0)
         returned = status.get("symbols_returned", 0)
-        lines.append(f"未出現明確偏多/偏空｜已查 {returned}/{requested} 檔。")
+        lines.append(f"⚪ 未出現明確偏多/偏空｜已查 {returned}/{requested} 檔。")
     note = options.get("scope_note")
     if note:
-        lines.append("範圍：非全市場 options flow。")
+        lines.append("📌 範圍：非全市場 options flow。")
     return lines
 
 
@@ -856,9 +886,9 @@ def compact_option_line(row: dict[str, Any]) -> str:
     side = row.get("strongest_contract_side") or "n/a"
     strike = _price(row.get("strongest_contract_strike"))
     return (
-        f"{row.get('ticker')} C/P {_num(row.get('call_put_volume_ratio'))}"
-        f"｜IV {_pct(row.get('avg_near_atm_iv'))}"
-        f"｜最大量 {side} {strike}"
+        f"{row.get('ticker')} C/P{_num(row.get('call_put_volume_ratio'))}"
+        f"｜IV{_pct(row.get('avg_near_atm_iv'))}"
+        f"｜{side} {strike}"
     )
 
 

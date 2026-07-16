@@ -1,0 +1,6 @@
+ticker,name,sector,theme,risk_bucket,fundamental_score,notes
+SPY,SPDR S&P 500 ETF,Financial infrastructure,market proxy,etf,,
+NVDA,NVIDIA,AI semiconductors,AI compute,large_cap,,
+ANET,Arista Networks,AI networking,AI networking,large_cap,,
+VRT,Vertiv,AI data center infrastructure,power and cooling,large_cap,,
+RKLB,Rocket Lab,Defense aerospace and space,space launch,space_high_beta,,

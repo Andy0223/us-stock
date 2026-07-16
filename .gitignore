@@ -1,0 +1,12 @@
+.DS_Store
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+outputs/
+data/price_cache/
+data/raw/
+data/holdings.csv
+data/inbox/firstrade/*
+!data/inbox/firstrade/README.md

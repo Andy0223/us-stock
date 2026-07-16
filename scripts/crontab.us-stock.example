@@ -1,0 +1,29 @@
+# US stock signal jobs.
+# Install with:
+#   crontab scripts/crontab.us-stock.example
+#
+# Safer install that preserves existing jobs:
+#   (crontab -l 2>/dev/null; cat scripts/crontab.us-stock.example) | crontab -
+#
+# Times are interpreted in the machine's local timezone. This Mac is expected
+# to be Asia/Taipei. Replace /path/to/us-stock with your local project path.
+#
+# US market time changes with daylight saving time. The examples below use:
+# - 21:00 Taipei for US daylight-saving months, roughly Mar-Oct
+# - 22:00 Taipei for US standard-time months, roughly Nov-Feb
+# - after-close review at 04:45 / 05:45 Taipei, Tue-Sat
+
+SHELL=/bin/bash
+PATH=/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin
+
+# Premarket swing plan. run_daily.sh updates data/universe_us_all.csv before scanning.
+# Sends Telegram when .env has US_STOCK_TELEGRAM_*.
+0 21 * 3-10 1-5 /path/to/us-stock/scripts/run_daily.sh >> /path/to/us-stock/outputs/cron/premarket.log 2>&1
+0 22 * 1,2,11,12 1-5 /path/to/us-stock/scripts/run_daily.sh >> /path/to/us-stock/outputs/cron/premarket.log 2>&1
+
+# After-close review.
+45 4 * 3-10 2-6 US_SWING_MODE=after_close /path/to/us-stock/scripts/run_daily.sh >> /path/to/us-stock/outputs/cron/after_close.log 2>&1
+45 5 * 1,2,11,12 2-6 US_SWING_MODE=after_close /path/to/us-stock/scripts/run_daily.sh >> /path/to/us-stock/outputs/cron/after_close.log 2>&1
+
+# Optional Firstrade CSV sync. Put the latest positions CSV in data/inbox/firstrade first.
+# 50 20 * * 1-5 /path/to/us-stock/scripts/run_firstrade_sync.sh >> /path/to/us-stock/outputs/cron/firstrade_sync.log 2>&1

@@ -1,0 +1,131 @@
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from datetime import date
+from pathlib import Path
+from typing import Any
+
+from .config import resolve_path
+from .market_calendar import is_us_early_close, is_us_trading_day, ny_today
+from .news import collect_symbol_news
+from .notify import send_telegram_message
+from .scanner import ScanResult, run_scan, scan_to_context
+from .strategy import StrategyReport, generate_strategy_report, sanitize_for_json
+
+
+@dataclass
+class PipelineResult:
+    as_of: date
+    mode: str
+    report: StrategyReport
+    scan: ScanResult | None
+    context_path: Path | None
+    report_path: Path | None
+    market_dashboard_path: Path | None
+    sector_scores_path: Path | None
+    candidates_path: Path | None
+    holdings_review_path: Path | None
+    telegram_sent: bool
+    telegram_error: str | None = None
+
+
+def run_pipeline(
+    config: dict[str, Any],
+    config_dir: Path,
+    mode: str | None = None,
+    as_of: date | None = None,
+    force: bool = False,
+    skip_ai: bool = False,
+    dry_run: bool = False,
+) -> PipelineResult:
+    run_mode = mode or str(config.get("mode", "premarket"))
+    market_cfg = config.get("market", {})
+    run_date = as_of or ny_today(str(market_cfg.get("timezone", "America/New_York")))
+    output_dir = resolve_path(config.get("output_dir", "outputs"), config_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    if bool(market_cfg.get("skip_non_trading_days", True)) and not force and not is_us_trading_day(run_date):
+        text = f"美股波段策略｜{run_date.isoformat()}\n今日不是美股正常交易日，未執行掃描與交易建議。"
+        report = StrategyReport(as_of=run_date, mode=run_mode, text=text, provider_status="non_trading_day")
+        telegram_sent = False
+        telegram_error = None
+        if bool(config.get("telegram", {}).get("enabled", False)) and not dry_run:
+            try:
+                send_telegram_message(config["telegram"], text)
+                telegram_sent = True
+            except Exception as exc:  # pragma: no cover - network/provider dependent
+                telegram_error = str(exc)
+        return PipelineResult(
+            as_of=run_date,
+            mode=run_mode,
+            report=report,
+            scan=None,
+            context_path=None,
+            report_path=None,
+            market_dashboard_path=None,
+            sector_scores_path=None,
+            candidates_path=None,
+            holdings_review_path=None,
+            telegram_sent=telegram_sent,
+            telegram_error=telegram_error,
+        )
+
+    scan = run_scan(config, config_dir, run_date)
+    context = scan_to_context(
+        scan,
+        int(config.get("scanner", {}).get("top_candidates", 40)),
+        dict(config.get("after_close_review", {})),
+    )
+    context["mode"] = run_mode
+    context["market_calendar"] = {
+        "is_trading_day": is_us_trading_day(run_date),
+        "is_early_close": is_us_early_close(run_date),
+    }
+    if run_mode == "after_close" and bool(config.get("news_review", {}).get("enabled", True)):
+        news_cfg = config.get("news_review", {})
+        context["news_review"] = collect_symbol_news(
+            context.get("after_close_review", {}).get("news_watch_symbols", []),
+            max_symbols=int(news_cfg.get("max_symbols", 14)),
+            max_items_per_symbol=int(news_cfg.get("max_items_per_symbol", 2)),
+        )
+    report = generate_strategy_report(config, config_dir, context, run_mode, run_date, skip_ai=skip_ai)
+
+    stamp = run_date.strftime("%Y%m%d")
+    context_path = output_dir / f"us_swing_context_{run_mode}_{stamp}.json"
+    report_path = output_dir / f"us_swing_report_{run_mode}_{stamp}.md"
+    market_dashboard_path = output_dir / f"market_dashboard_{stamp}.csv"
+    sector_scores_path = output_dir / f"sector_scores_{stamp}.csv"
+    candidates_path = output_dir / f"candidate_scores_{stamp}.csv"
+    holdings_review_path = output_dir / f"holdings_review_{stamp}.csv"
+
+    context_path.write_text(json.dumps(sanitize_for_json(context), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    report_path.write_text(report.text + "\n", encoding="utf-8")
+    scan.market_dashboard.to_csv(market_dashboard_path, index=False)
+    scan.sector_scores.to_csv(sector_scores_path, index=False)
+    scan.candidates.to_csv(candidates_path, index=False)
+    scan.holdings_review.to_csv(holdings_review_path, index=False)
+
+    telegram_sent = False
+    telegram_error = None
+    if bool(config.get("telegram", {}).get("enabled", False)) and not dry_run:
+        try:
+            send_telegram_message(config["telegram"], report.text)
+            telegram_sent = True
+        except Exception as exc:  # pragma: no cover - network/provider dependent
+            telegram_error = str(exc)
+
+    return PipelineResult(
+        as_of=run_date,
+        mode=run_mode,
+        report=report,
+        scan=scan,
+        context_path=context_path,
+        report_path=report_path,
+        market_dashboard_path=market_dashboard_path,
+        sector_scores_path=sector_scores_path,
+        candidates_path=candidates_path,
+        holdings_review_path=holdings_review_path,
+        telegram_sent=telegram_sent,
+        telegram_error=telegram_error,
+    )

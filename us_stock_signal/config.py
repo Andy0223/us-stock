@@ -110,6 +110,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "overextended_return_20d": 0.35,
         "overextended_pct_above_ma20": 0.15,
     },
+    "watchlist": {
+        "enabled": True,
+        "path": "data/watchlist_next_day.csv",
+    },
     "options_review": {
         "enabled": True,
         "max_symbols": 14,

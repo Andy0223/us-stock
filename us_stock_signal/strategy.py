@@ -205,6 +205,7 @@ def fallback_report(context: dict[str, Any], mode: str, provider_status: str) ->
     holdings = context.get("holdings_review", [])
     candidates = context.get("top_candidates", [])
     options = context.get("options_review", {})
+    watchlist = context.get("watchlist_review", {})
     warnings = context.get("warnings", [])
     cash_value = _float_or_none(portfolio.get("cash_value"))
     negative_cash = cash_value is not None and cash_value < 0
@@ -227,6 +228,9 @@ def fallback_report(context: dict[str, Any], mode: str, provider_status: str) ->
         market_chart_line(market_state),
         ma50_chart_line(market_state),
         cash_chart_line(portfolio, market_state, margin_status),
+        "",
+        "[昨日追蹤清單]",
+        *watchlist_review_lines(watchlist),
         "",
         "[持股處理]",
     ]
@@ -279,6 +283,7 @@ def fallback_after_close_report(context: dict[str, Any], provider_status: str) -
     review = context.get("after_close_review", {})
     news = context.get("news_review", {})
     options = context.get("options_review", {})
+    watchlist_created = context.get("watchlist_created", {})
     warnings = context.get("warnings", [])
 
     missed_buys = review.get("missed_buy_candidates", []) or []
@@ -344,6 +349,9 @@ def fallback_after_close_report(context: dict[str, Any], provider_status: str) -
 
     lines.extend(["", "[期權檢查]"])
     lines.extend(options_summary_lines(options, compact=True))
+
+    lines.extend(["", "[已建立明日追蹤清單]"])
+    lines.extend(watchlist_created_lines(watchlist_created))
 
     lines.extend(["", "[風控明日劇本]"])
     lines.append(f"現金 {_money(portfolio.get('cash_value'))}｜股票 {_money(portfolio.get('stock_value'))}｜總權益 {_money(portfolio.get('total_equity'))}")
@@ -492,6 +500,80 @@ def compact_news_line(item: dict[str, Any]) -> str:
     publisher = short_text(item.get("publisher"), 12)
     title = short_text(item.get("title"), 72)
     return f"{ticker}｜{publisher}｜{title}"
+
+
+def watchlist_review_lines(review: dict[str, Any]) -> list[str]:
+    if not isinstance(review, dict):
+        return ["沒有可用追蹤清單。"]
+    summary = review.get("summary", {}) if isinstance(review.get("summary"), dict) else {}
+    active_count = int(_float_or_none(summary.get("active_count")) or 0)
+    if active_count <= 0:
+        return ["沒有昨日延續到今天的追蹤任務。"]
+
+    triggered = review.get("triggered", []) or []
+    missed = review.get("missed", []) or []
+    waiting = review.get("still_waiting", []) or []
+    no_price = review.get("no_price", []) or []
+    lines = [
+        f"任務 {active_count}｜觸發 {len(triggered)}｜錯過 {len(missed)}｜等待 {len(waiting)}｜無價 {len(no_price)}",
+    ]
+    if triggered:
+        lines.append("已觸發：" + "；".join(watchlist_item_line(row) for row in triggered[:4]))
+    if missed:
+        lines.append("已錯過：" + "；".join(watchlist_item_line(row) for row in missed[:4]))
+    if waiting:
+        lines.append("等待：" + "；".join(watchlist_item_line(row) for row in waiting[:4]))
+    if no_price:
+        lines.append("無價：" + "；".join(str(row.get("ticker", "")) for row in no_price[:8]))
+    return lines
+
+
+def watchlist_created_lines(created: dict[str, Any]) -> list[str]:
+    if not isinstance(created, dict):
+        return ["沒有建立明日追蹤清單。"]
+    items = created.get("items", []) or []
+    valid_for = created.get("valid_for", "n/a")
+    if not items:
+        return [f"{valid_for} 沒有明確追蹤任務。"]
+    sell = [row for row in items if row.get("action") == "sell_or_reduce"]
+    buy = [row for row in items if row.get("action") in {"buy_watch", "add_watch"}]
+    news = [row for row in items if "news" in str(row.get("action", ""))]
+    lines = [f"{valid_for} 共 {len(items)} 檔"]
+    if sell:
+        lines.append("先處理：" + "；".join(watchlist_plan_line(row) for row in sell[:4]))
+    if buy:
+        lines.append("買/加追蹤：" + "；".join(watchlist_plan_line(row) for row in buy[:4]))
+    if news:
+        lines.append("消息追蹤：" + "；".join(str(row.get("ticker", "")) for row in news[:6]))
+    return lines
+
+
+def watchlist_item_line(row: dict[str, Any]) -> str:
+    ticker = row.get("ticker", "")
+    action = watchlist_action_label(row.get("action"))
+    price = _price(row.get("current_price"))
+    note = short_text(row.get("evaluation_note"), 18)
+    return f"{ticker} {action}｜現價 {price}｜{note}"
+
+
+def watchlist_plan_line(row: dict[str, Any]) -> str:
+    ticker = row.get("ticker", "")
+    action = watchlist_action_label(row.get("action"))
+    low = _price(row.get("trigger_low"))
+    high = _price(row.get("trigger_high"))
+    stop = _price(row.get("stop_loss"))
+    return f"{ticker} {action}｜觸發 {low}-{high}｜停損 {stop}"
+
+
+def watchlist_action_label(value: Any) -> str:
+    labels = {
+        "sell_or_reduce": "賣/減碼",
+        "add_watch": "加碼",
+        "buy_watch": "買進",
+        "risk_news_watch": "風險消息",
+        "momentum_news_watch": "動能消息",
+    }
+    return labels.get(str(value), str(value or "追蹤"))
 
 
 def text_bar(value: Any, width: int = 10) -> str:

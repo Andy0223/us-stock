@@ -15,6 +15,7 @@ from .notify import send_telegram_message
 from .options import collect_options_review
 from .scanner import ScanResult, run_scan, scan_to_context
 from .strategy import StrategyReport, generate_strategy_report, sanitize_for_json
+from .watchlist import build_next_day_watchlist, evaluate_watchlist, load_active_watchlist, next_calendar_day, write_watchlist
 
 
 @dataclass
@@ -30,6 +31,7 @@ class PipelineResult:
     candidates_path: Path | None
     holdings_review_path: Path | None
     options_review_path: Path | None
+    watchlist_path: Path | None
     telegram_sent: bool
     telegram_error: str | None = None
 
@@ -72,6 +74,7 @@ def run_pipeline(
             candidates_path=None,
             holdings_review_path=None,
             options_review_path=None,
+            watchlist_path=None,
             telegram_sent=telegram_sent,
             telegram_error=telegram_error,
         )
@@ -87,6 +90,10 @@ def run_pipeline(
         "is_trading_day": is_us_trading_day(run_date),
         "is_early_close": is_us_early_close(run_date),
     }
+    watchlist_cfg = dict(config.get("watchlist", {}))
+    watchlist_path = resolve_path(watchlist_cfg.get("path", "data/watchlist_next_day.csv"), config_dir)
+    active_watchlist = load_active_watchlist(watchlist_path, run_date)
+    context["watchlist_review"] = evaluate_watchlist(active_watchlist, context, price_map=scan_price_lookup(scan))
     if run_mode == "after_close" and bool(config.get("news_review", {}).get("enabled", True)):
         news_cfg = config.get("news_review", {})
         context["news_review"] = collect_symbol_news(
@@ -102,6 +109,12 @@ def run_pipeline(
             as_of=run_date,
             config=option_cfg,
         )
+    if run_mode == "after_close" and bool(watchlist_cfg.get("enabled", True)):
+        valid_for = next_calendar_day(run_date)
+        context["watchlist_created"] = {
+            "valid_for": valid_for.isoformat(),
+            "items": build_next_day_watchlist(context, valid_for),
+        }
     report = generate_strategy_report(config, config_dir, context, run_mode, run_date, skip_ai=skip_ai)
 
     stamp = run_date.strftime("%Y%m%d")
@@ -120,6 +133,8 @@ def run_pipeline(
     scan.candidates.to_csv(candidates_path, index=False)
     scan.holdings_review.to_csv(holdings_review_path, index=False)
     pd.DataFrame(context.get("options_review", {}).get("rows", [])).to_csv(options_review_path, index=False)
+    if run_mode == "after_close" and bool(watchlist_cfg.get("enabled", True)):
+        write_watchlist(watchlist_path, context.get("watchlist_created", {}).get("items", []))
 
     telegram_sent = False
     telegram_error = None
@@ -142,6 +157,7 @@ def run_pipeline(
         candidates_path=candidates_path,
         holdings_review_path=holdings_review_path,
         options_review_path=options_review_path,
+        watchlist_path=watchlist_path,
         telegram_sent=telegram_sent,
         telegram_error=telegram_error,
     )
@@ -157,6 +173,10 @@ def options_review_symbols(context: dict[str, Any], option_cfg: dict[str, Any]) 
             add_symbol(symbols, row.get("ticker"))
     for symbol in context.get("after_close_review", {}).get("news_watch_symbols", []) or []:
         add_symbol(symbols, symbol)
+    for row in context.get("watchlist_review", {}).get("triggered", []) or []:
+        add_symbol(symbols, row.get("ticker"))
+    for row in context.get("watchlist_review", {}).get("missed", []) or []:
+        add_symbol(symbols, row.get("ticker"))
     return symbols
 
 
@@ -182,3 +202,19 @@ def add_symbol(symbols: list[str], value: Any) -> None:
         return
     if symbol not in symbols:
         symbols.append(symbol)
+
+
+def scan_price_lookup(scan: ScanResult) -> dict[str, float]:
+    lookup: dict[str, float] = {}
+    for frame, symbol_key in [(scan.holdings_review, "ticker"), (scan.candidates, "ticker"), (scan.market_dashboard, "symbol")]:
+        if frame is None or frame.empty or symbol_key not in frame or "close" not in frame:
+            continue
+        for row in frame[[symbol_key, "close"]].itertuples(index=False):
+            symbol = str(getattr(row, symbol_key)).strip().upper()
+            if not symbol:
+                continue
+            try:
+                lookup[symbol] = float(getattr(row, "close"))
+            except (TypeError, ValueError):
+                continue
+    return lookup

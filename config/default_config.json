@@ -99,6 +99,10 @@
     "max_symbols": 14,
     "max_items_per_symbol": 2
   },
+  "watchlist": {
+    "enabled": true,
+    "path": "data/watchlist_next_day.csv"
+  },
   "options_review": {
     "enabled": true,
     "max_symbols": 14,

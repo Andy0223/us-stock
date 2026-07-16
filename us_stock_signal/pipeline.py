@@ -6,10 +6,13 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
+
 from .config import resolve_path
 from .market_calendar import is_us_early_close, is_us_trading_day, ny_today
 from .news import collect_symbol_news
 from .notify import send_telegram_message
+from .options import collect_options_review
 from .scanner import ScanResult, run_scan, scan_to_context
 from .strategy import StrategyReport, generate_strategy_report, sanitize_for_json
 
@@ -26,6 +29,7 @@ class PipelineResult:
     sector_scores_path: Path | None
     candidates_path: Path | None
     holdings_review_path: Path | None
+    options_review_path: Path | None
     telegram_sent: bool
     telegram_error: str | None = None
 
@@ -67,6 +71,7 @@ def run_pipeline(
             sector_scores_path=None,
             candidates_path=None,
             holdings_review_path=None,
+            options_review_path=None,
             telegram_sent=telegram_sent,
             telegram_error=telegram_error,
         )
@@ -89,6 +94,14 @@ def run_pipeline(
             max_symbols=int(news_cfg.get("max_symbols", 14)),
             max_items_per_symbol=int(news_cfg.get("max_items_per_symbol", 2)),
         )
+    if bool(config.get("options_review", {}).get("enabled", True)):
+        option_cfg = dict(config.get("options_review", {}))
+        context["options_review"] = collect_options_review(
+            options_review_symbols(context, option_cfg),
+            price_lookup=price_lookup(context),
+            as_of=run_date,
+            config=option_cfg,
+        )
     report = generate_strategy_report(config, config_dir, context, run_mode, run_date, skip_ai=skip_ai)
 
     stamp = run_date.strftime("%Y%m%d")
@@ -98,6 +111,7 @@ def run_pipeline(
     sector_scores_path = output_dir / f"sector_scores_{stamp}.csv"
     candidates_path = output_dir / f"candidate_scores_{stamp}.csv"
     holdings_review_path = output_dir / f"holdings_review_{stamp}.csv"
+    options_review_path = output_dir / f"options_review_{stamp}.csv"
 
     context_path.write_text(json.dumps(sanitize_for_json(context), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     report_path.write_text(report.text + "\n", encoding="utf-8")
@@ -105,6 +119,7 @@ def run_pipeline(
     scan.sector_scores.to_csv(sector_scores_path, index=False)
     scan.candidates.to_csv(candidates_path, index=False)
     scan.holdings_review.to_csv(holdings_review_path, index=False)
+    pd.DataFrame(context.get("options_review", {}).get("rows", [])).to_csv(options_review_path, index=False)
 
     telegram_sent = False
     telegram_error = None
@@ -126,6 +141,44 @@ def run_pipeline(
         sector_scores_path=sector_scores_path,
         candidates_path=candidates_path,
         holdings_review_path=holdings_review_path,
+        options_review_path=options_review_path,
         telegram_sent=telegram_sent,
         telegram_error=telegram_error,
     )
+
+
+def options_review_symbols(context: dict[str, Any], option_cfg: dict[str, Any]) -> list[str]:
+    symbols: list[str] = []
+    top_candidate_limit = int(option_cfg.get("top_candidate_symbols", 10))
+    for row in context.get("holdings_review", []) or []:
+        add_symbol(symbols, row.get("ticker"))
+    for row in (context.get("top_candidates", []) or [])[:top_candidate_limit]:
+        if row.get("category") in {"A", "B", "D", "E"}:
+            add_symbol(symbols, row.get("ticker"))
+    for symbol in context.get("after_close_review", {}).get("news_watch_symbols", []) or []:
+        add_symbol(symbols, symbol)
+    return symbols
+
+
+def price_lookup(context: dict[str, Any]) -> dict[str, float]:
+    lookup: dict[str, float] = {}
+    for key, symbol_key in [("holdings_review", "ticker"), ("top_candidates", "ticker"), ("market_dashboard", "symbol")]:
+        for row in context.get(key, []) or []:
+            symbol = str(row.get(symbol_key, "")).strip().upper()
+            if not symbol:
+                continue
+            try:
+                lookup[symbol] = float(row.get("close"))
+            except (TypeError, ValueError):
+                continue
+    return lookup
+
+
+def add_symbol(symbols: list[str], value: Any) -> None:
+    symbol = str(value or "").strip().upper()
+    if not symbol or symbol in {"CASH", "MARGIN_BALANCE"}:
+        return
+    if symbol.startswith("^") or "=" in symbol:
+        return
+    if symbol not in symbols:
+        symbols.append(symbol)

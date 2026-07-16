@@ -99,6 +99,22 @@
     "max_symbols": 14,
     "max_items_per_symbol": 2
   },
+  "options_review": {
+    "enabled": true,
+    "max_symbols": 14,
+    "top_candidate_symbols": 10,
+    "max_expirations": 3,
+    "min_days_to_expiry": 3,
+    "max_days_to_expiry": 45,
+    "near_atm_pct": 0.05,
+    "min_total_contract_volume": 500,
+    "min_near_atm_volume": 100,
+    "bullish_call_put_ratio": 1.5,
+    "bearish_put_call_ratio": 1.3,
+    "high_iv_threshold": 0.65,
+    "max_alerts": 8,
+    "pause_seconds": 0.05
+  },
   "risk": {
     "red_vix": 25.0,
     "yellow_vix": 20.0,

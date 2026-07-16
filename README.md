@@ -8,6 +8,7 @@
 - Universe 預設改為 Nasdaq Trader symbol directory 產生的美股全市場股票清單，精選池 `data/universe_us_swing.csv` 仍可手動指定。
 - 通知 bot 改用獨立環境變數：`US_STOCK_TELEGRAM_BOT_TOKEN` / `US_STOCK_TELEGRAM_CHAT_ID`。
 - 流程採 Portfolio First：先讀持股與現金，再看新候選。
+- 盤前/盤後會用免費 yfinance option chain 對持股與前排候選做期權確認。
 - OpenAI API 是選配；在 Codex 互動使用時可以不打 API，由 Codex 讀 context 後產生完整報告。
 
 ## Install
@@ -57,6 +58,24 @@ OPENAI_REASONING_EFFORT=xhigh
 - B 類只等回檔，不用融資
 
 目前帳戶若已超過負現金上限，報告會顯示「融資不可新增」，但不再把融資視為永久禁止。
+
+## Options review
+
+期權雷達目前使用 `yfinance` 抓 option chain，預設只檢查：
+
+- 目前持股
+- 前排 A/B/D/E 候選股
+- 盤後覆盤的 news/watch symbols
+
+預設最多 14 檔、每檔近月 3 個到期日，不做全市場逐筆 options flow。報告會標示：
+
+- call/put volume ratio
+- near-ATM call/put ratio
+- near-ATM IV
+- 最大量合約
+- 偏多確認、偏空警訊、IV 偏高勿追
+
+這層只作為股票訊號的確認或降級依據，不是內線消息，也不是完整機構大單流。
 
 ## Run
 
@@ -113,6 +132,7 @@ US_SWING_MODE=after_close ./scripts/run_daily.sh
 - 該賣掉或該減碼但沒處理的部位
 - 單日/五日大漲跌、20 日新高/新低與產業輪動
 - 相關 ticker 的免費新聞提醒
+- 持股/候選股的期權偏多、偏空與 IV 過熱提醒
 
 不送 Telegram、也不打 OpenAI：
 
@@ -167,6 +187,7 @@ data/inbox/firstrade/
 - `holdings_review_YYYYMMDD.csv`
 - `market_dashboard_YYYYMMDD.csv`
 - `sector_scores_YYYYMMDD.csv`
+- `options_review_YYYYMMDD.csv`
 
 ## Notes
 

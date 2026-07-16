@@ -70,6 +70,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Wrote context: {result.context_path}")
     if result.candidates_path:
         print(f"Wrote candidates: {result.candidates_path}")
+    if result.options_review_path:
+        print(f"Wrote options review: {result.options_review_path}")
     print(f"Provider: {result.report.provider_status}")
     print(f"Telegram sent: {result.telegram_sent}")
     if result.telegram_error:

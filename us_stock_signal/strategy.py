@@ -72,7 +72,8 @@ def build_prompt(strategy_text: str, context: dict[str, Any], mode: str) -> str:
         "5. 輸出使用繁體中文，給出可執行價位、比例、失效條件與隔日雙向劇本。\n"
         "6. 如果任務是盤後覆盤，必須明確檢討該買未買、該賣未賣、該加碼未加、異常漲跌、產業輪動與 news_review 中的消息提醒。\n"
         "7. 融資不是絕對禁止；必須依 context.market_state.margin_policy 判斷。只有 green 風險燈號、A 類標的、未超過負現金上限、且非追高時，才可討論小額受控融資。\n"
-        "8. 不得使用保證獲利、必漲、一定會漲、無風險等字眼。\n\n"
+        "8. options_review 是免費 yfinance 期權鏈摘要，只能當確認/警訊，不能當成完整 options flow 或內線訊號。\n"
+        "9. 不得使用保證獲利、必漲、一定會漲、無風險等字眼。\n\n"
         f"JSON context:\n{context_json}"
     )
 
@@ -203,6 +204,7 @@ def fallback_report(context: dict[str, Any], mode: str, provider_status: str) ->
     portfolio = context.get("portfolio", {})
     holdings = context.get("holdings_review", [])
     candidates = context.get("top_candidates", [])
+    options = context.get("options_review", {})
     warnings = context.get("warnings", [])
     cash_value = _float_or_none(portfolio.get("cash_value"))
     negative_cash = cash_value is not None and cash_value < 0
@@ -262,18 +264,21 @@ def fallback_report(context: dict[str, Any], mode: str, provider_status: str) ->
     else:
         lines.append("目前沒有因過度延伸被列為 C 類的前排候選。")
 
+    lines.extend(["", "6. 期權確認"])
+    lines.extend(options_summary_lines(options))
+
     lines.extend(
         [
             "",
-            "6. 資金配置",
+            "7. 資金配置",
             f"帳戶現金 {_money(portfolio.get('cash_value'))}｜現金比 {_pct(portfolio.get('cash_weight'))}｜策略建議現金 {market_state.get('cash_target', 'n/a')}",
             f"新增曝險上限 {_pct(market_state.get('new_exposure_limit'))}｜單檔上限 {_pct(market_state.get('single_name_limit'))}｜{margin_policy_line(margin_status)}",
             "",
-            "7. 明日雙向劇本",
+            "8. 明日雙向劇本",
             "上漲：不追超過 no_chase_above 的跳空，等回測或量縮守住再加。",
             "下跌：先分辨正常回檔與失效；跌破停損或市場升級黃/橘/紅燈時取消加碼。",
             "",
-            "8. 最終一句話結論",
+            "9. 最終一句話結論",
         ]
     )
     if negative_cash:
@@ -299,6 +304,7 @@ def fallback_after_close_report(context: dict[str, Any], provider_status: str) -
     portfolio = context.get("portfolio", {})
     review = context.get("after_close_review", {})
     news = context.get("news_review", {})
+    options = context.get("options_review", {})
     warnings = context.get("warnings", [])
 
     missed_buys = review.get("missed_buy_candidates", []) or []
@@ -374,7 +380,10 @@ def fallback_after_close_report(context: dict[str, Any], provider_status: str) -
         returned = source_status.get("symbols_returned", 0)
         lines.append(f"免費新聞源沒有回傳可用標題｜requested {requested} / returned {returned}。重大消息仍需人工看券商/新聞 app。")
 
-    lines.extend(["", "7. 明日行動清單"])
+    lines.extend(["", "7. 期權檢查"])
+    lines.extend(options_summary_lines(options))
+
+    lines.extend(["", "8. 明日行動清單"])
     if missed_sells:
         lines.append("先處理該賣/該減碼清單，再考慮任何新買進。")
     if negative_cash:
@@ -389,7 +398,7 @@ def fallback_after_close_report(context: dict[str, Any], provider_status: str) -
     if not missed_sells and not missed_buys and not missed_adds:
         lines.append("明天維持原持股與現金配置，等待更清楚訊號。")
 
-    lines.extend(["", "8. 最終一句話結論"])
+    lines.extend(["", "9. 最終一句話結論"])
     if negative_cash:
         if margin_status["can_add_margin"]:
             lines.append("可保留小額融資彈性，但只能用在 A 類買點，不能用來追 B 類或補弱股。")
@@ -439,6 +448,49 @@ def _sector_line(row: dict[str, Any]) -> str:
 
 def _ticker_move(row: dict[str, Any]) -> str:
     return f"{row.get('ticker')} {_pct(row.get('return_1d'))}｜{row.get('sector', '')}"
+
+
+def options_summary_lines(options: dict[str, Any]) -> list[str]:
+    if not isinstance(options, dict) or not options.get("enabled"):
+        return ["期權檢查未啟用。"]
+
+    bullish = options.get("bullish_confirmations", []) or []
+    bearish = options.get("bearish_warnings", []) or []
+    high_iv = options.get("high_iv_watchlist", []) or []
+    status = options.get("source_status", {}) if isinstance(options.get("source_status"), dict) else {}
+    lines: list[str] = []
+
+    if bullish:
+        lines.append("偏多確認：" + "；".join(_option_line(row) for row in bullish[:4]))
+    if bearish:
+        lines.append("偏空警訊：" + "；".join(_option_line(row) for row in bearish[:4]))
+    if high_iv:
+        lines.append("IV 偏高勿追：" + "；".join(_option_iv_line(row) for row in high_iv[:4]))
+    if not lines:
+        requested = status.get("symbols_requested", 0)
+        returned = status.get("symbols_returned", 0)
+        lines.append(f"未出現明確期權偏多/偏空確認｜checked {returned}/{requested} 檔。")
+    note = options.get("scope_note")
+    if note:
+        lines.append(f"範圍：{note}")
+    return lines
+
+
+def _option_line(row: dict[str, Any]) -> str:
+    side = row.get("strongest_contract_side") or "n/a"
+    expiry = row.get("strongest_contract_expiry") or "n/a"
+    strike = _price(row.get("strongest_contract_strike"))
+    return (
+        f"{row.get('ticker')} {row.get('alert', '')}"
+        f"｜C/P {_num(row.get('call_put_volume_ratio'))}"
+        f"｜近ATM C/P {_num(row.get('near_atm_call_put_ratio'))}"
+        f"｜IV {_pct(row.get('avg_near_atm_iv'))}"
+        f"｜最大量 {side} {expiry} {strike}"
+    )
+
+
+def _option_iv_line(row: dict[str, Any]) -> str:
+    return f"{row.get('ticker')} IV {_pct(row.get('avg_near_atm_iv'))}｜{row.get('alert', '')}"
 
 
 def controlled_margin_status(market_state: dict[str, Any], portfolio: dict[str, Any]) -> dict[str, Any]:

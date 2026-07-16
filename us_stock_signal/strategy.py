@@ -209,92 +209,66 @@ def fallback_report(context: dict[str, Any], mode: str, provider_status: str) ->
     cash_value = _float_or_none(portfolio.get("cash_value"))
     negative_cash = cash_value is not None and cash_value < 0
     margin_status = controlled_margin_status(market_state, portfolio)
-    title = "美股波段盤前策略" if mode == "premarket" else "美股波段盤後覆盤"
 
     category_a = [row for row in candidates if row.get("category") == "A"][:5]
     wait_list = [row for row in candidates if row.get("category") in {"B", "D"}][:5]
     no_chase = [row for row in candidates if row.get("category") == "C"][:5]
+    reduce_list = [
+        row
+        for row in holdings
+        if _float_or_none(row.get("suggested_sell_pct")) and (_float_or_none(row.get("suggested_sell_pct")) or 0) > 0
+    ][:5]
 
     lines = [
-        f"{title}｜{as_of}",
-        f"AI 狀態：{provider_status}",
+        f"美股盤前快報｜{as_of}",
+        f"結論：{premarket_conclusion(negative_cash, margin_status, category_a, market_state)}",
         "",
-        "1. 今日盤勢總結",
-        f"市場狀態：{market_state.get('market_day_type', 'n/a')}｜風險燈號：{market_state.get('risk_light', 'n/a')}",
-        f"廣度：上漲 {market_state.get('advancers', 0)} / 下跌 {market_state.get('decliners', 0)}｜MA50 上方比例 {_pct(market_state.get('above_ma50_ratio'))}",
+        "[盤勢圖表]",
+        market_chart_line(market_state),
+        ma50_chart_line(market_state),
+        cash_chart_line(portfolio, market_state, margin_status),
         "",
-        "2. 我的持股操作",
+        "[持股處理]",
     ]
-    if holdings:
-        for row in holdings[:8]:
-            lines.append(
-                f"{row.get('ticker')} {row.get('name')}｜{row.get('action')}｜權重 {_pct(row.get('portfolio_weight'))}｜損益 {_pct(row.get('unrealized_pnl_pct'))}｜停損 {_price(row.get('stop_loss'))}｜{row.get('reason')}"
-            )
+    if reduce_list:
+        lines.append("先處理：" + "；".join(compact_holding_action(row) for row in reduce_list))
+    elif holdings:
+        lines.append("沒有強制減碼；照停損價管理。")
     else:
-        lines.append("尚未提供 holdings.csv；無法做 Portfolio First 的完整持股判斷。")
+        lines.append("尚未提供 holdings.csv，無法做持股優先判斷。")
+    if holdings:
+        lines.extend(compact_holdings_table(holdings[:8]))
 
-    lines.extend(
-        [
-            "",
-            "3. 今日可布局股票",
-        ]
-    )
+    lines.extend(["", "[今日可買 / 觀察]"])
     if category_a:
         for row in category_a:
             cash_note = ""
             if negative_cash:
-                cash_note = "｜可用受控融資小筆" if margin_status["can_add_margin"] else f"｜{margin_status['short_note']}，僅觀察"
-            lines.append(
-                f"{row.get('ticker')}｜分數 {_num(row.get('total_score_100'))}｜第一筆 {_pct(row.get('first_tranche_pct'))}｜進場 {_price(row.get('entry_low'))}-{_price(row.get('entry_high'))}｜停損 {_price(row.get('stop_loss'))}{cash_note}"
-            )
+                cash_note = "｜受控融資可小筆" if margin_status["can_add_margin"] else "｜現金為負，先觀察"
+            lines.append(compact_candidate(row, prefix="可買", suffix=cash_note))
     else:
-        lines.append("沒有 A 類候選；今日保留現金，不因有現金而降低標準。")
-
-    lines.extend(["", "4. 等回檔 / 中期觀察"])
+        lines.append("可買：沒有 A 類。今天不降低標準。")
     if wait_list:
+        lines.append("觀察名單：")
         for row in wait_list:
-            lines.append(f"{row.get('ticker')}｜{row.get('category')}｜分數 {_num(row.get('total_score_100'))}｜等待區 {_price(row.get('entry_low'))}-{_price(row.get('entry_high'))}｜{row.get('reason')}")
-    else:
-        lines.append("沒有明確等回檔名單。")
-
-    lines.extend(["", "5. 不建議追的股票"])
+            lines.append(compact_candidate(row, prefix="觀察"))
     if no_chase:
-        for row in no_chase:
-            lines.append(f"{row.get('ticker')}｜不追高於 {_price(row.get('no_chase_above'))}｜{row.get('reason')}")
-    else:
-        lines.append("目前沒有因過度延伸被列為 C 類的前排候選。")
+        lines.append("不追高：" + "；".join(f"{row.get('ticker')} > {_price(row.get('no_chase_above'))}" for row in no_chase[:4]))
 
-    lines.extend(["", "6. 期權確認"])
-    lines.extend(options_summary_lines(options))
+    lines.extend(["", "[期權確認]"])
+    lines.extend(options_summary_lines(options, compact=True))
 
-    lines.extend(
-        [
-            "",
-            "7. 資金配置",
-            f"帳戶現金 {_money(portfolio.get('cash_value'))}｜現金比 {_pct(portfolio.get('cash_weight'))}｜策略建議現金 {market_state.get('cash_target', 'n/a')}",
-            f"新增曝險上限 {_pct(market_state.get('new_exposure_limit'))}｜單檔上限 {_pct(market_state.get('single_name_limit'))}｜{margin_policy_line(margin_status)}",
-            "",
-            "8. 明日雙向劇本",
-            "上漲：不追超過 no_chase_above 的跳空，等回測或量縮守住再加。",
-            "下跌：先分辨正常回檔與失效；跌破停損或市場升級黃/橘/紅燈時取消加碼。",
-            "",
-            "9. 最終一句話結論",
-        ]
-    )
-    if negative_cash:
-        if margin_status["can_add_margin"] and category_a:
-            lines.append("帳戶現金為負但仍在受控上限內；只允許 A 類小額融資，跌破停損立即退出。")
-        elif margin_status["is_over_limit"]:
-            lines.append("融資已達/超過受控上限，不開新倉；先把負現金降回上限內。")
-        else:
-            lines.append("帳戶現金為負且融資條件不符，不開新倉；先控風險。")
-    elif category_a and market_state.get("risk_light") in {"green", "neutral"}:
-        lines.append("今天最多小買第一筆，仍以持股風控與保留現金優先。")
-    else:
-        lines.append("今日沒有比保留現金更好的交易，先保護資金與既有獲利。")
+    lines.extend(["", "[風控與劇本]"])
+    lines.append(f"現金 {_money(portfolio.get('cash_value'))}｜現金比 {_pct(portfolio.get('cash_weight'))}｜目標現金 {market_state.get('cash_target', 'n/a')}")
+    lines.append(f"新增曝險上限 {_pct(market_state.get('new_exposure_limit'))}｜單檔上限 {_pct(market_state.get('single_name_limit'))}")
+    lines.append(margin_policy_line(margin_status))
+    lines.append("上漲：不追跳空，等回測守住再加。")
+    lines.append("下跌：跌破停損或市場轉黃/橘/紅，取消加碼。")
+
     if warnings:
-        lines.extend(["", "資料提醒"])
-        lines.extend(f"- {warning}" for warning in warnings[:5])
+        lines.extend(["", "[資料提醒]"])
+        lines.extend(f"- {clean_warning(warning)}" for warning in warnings[:4])
+    lines.append(f"\n產生方式：{provider_label(provider_status)}")
     return "\n".join(lines)
 
 
@@ -321,102 +295,73 @@ def fallback_after_close_report(context: dict[str, Any], provider_status: str) -
     margin_status = controlled_margin_status(market_state, portfolio)
 
     lines = [
-        f"美股波段盤後覆盤｜{as_of}",
-        f"AI 狀態：{provider_status}",
+        f"美股盤後覆盤｜{as_of}",
+        f"結論：{after_close_conclusion(negative_cash, margin_status, missed_sells, missed_buys, missed_adds)}",
         "",
-        "1. 收盤總結",
-        f"市場狀態：{market_state.get('market_day_type', 'n/a')}｜風險燈號：{market_state.get('risk_light', 'n/a')}",
-        f"廣度：上漲 {market_state.get('advancers', 0)} / 下跌 {market_state.get('decliners', 0)}｜MA50 上方比例 {_pct(market_state.get('above_ma50_ratio'))}",
-        f"帳戶現金 {_money(portfolio.get('cash_value'))}｜股票市值 {_money(portfolio.get('stock_value'))}｜總權益 {_money(portfolio.get('total_equity'))}",
+        "[收盤圖表]",
+        market_chart_line(market_state),
+        ma50_chart_line(market_state),
+        cash_chart_line(portfolio, market_state, margin_status),
     ]
-    if negative_cash:
-        if margin_status["can_add_margin"]:
-            lines.append("現金為負但仍在受控融資上限內：只有 A 類、回測買點、非追高才可討論小額融資。")
-        else:
-            lines.append(f"現金為負且{margin_status['short_note']}：所有可買/可加先當作觀察。")
 
-    lines.extend(["", "2. 該入手但沒買 / 明天要追蹤"])
-    if missed_buys:
-        for row in missed_buys[:6]:
-            prefix = "可評估" if negative_cash and margin_status["can_add_margin"] else "觀察" if negative_cash else "檢討"
-            lines.append(f"{prefix}｜{_candidate_line(row)}")
-    else:
-        lines.append("沒有明確未持有且達到買進檢討門檻的標的。")
-
-    lines.extend(["", "3. 該加碼但沒加"])
-    if missed_adds:
-        for row in missed_adds[:6]:
-            lines.append(_holding_line(row))
-    else:
-        lines.append("既有持股沒有明確加碼訊號；若帳戶現金仍為負，這是合理結果。")
-
-    lines.extend(["", "4. 該賣沒賣 / 風險未降"])
+    lines.extend(["", "[明日優先順序]"])
     if missed_sells:
-        for row in missed_sells[:8]:
-            lines.append(_holding_line(row))
+        lines.append("1. 先降風險：" + "；".join(compact_holding_action(row) for row in missed_sells[:5]))
+    elif negative_cash:
+        lines.append("1. 先降融資：現金為負，新增買進先暫停。")
     else:
-        lines.append("沒有新的強制減碼或停損訊號；仍需照停損價執行。")
+        lines.append("1. 沒有強制賣出訊號，照停損管理。")
+    if missed_buys:
+        action_word = "觀察" if negative_cash and not margin_status["can_add_margin"] else "檢討"
+        lines.append(f"2. {action_word}錯過買點：" + "；".join(compact_candidate(row, prefix="") for row in missed_buys[:4]))
+    else:
+        lines.append("2. 沒有明確該買未買名單。")
+    if missed_adds and not negative_cash:
+        lines.append("3. 可加碼：" + "；".join(compact_holding_action(row) for row in missed_adds[:4]))
+    else:
+        lines.append("3. 不主動加碼，等更乾淨買點。")
 
-    lines.extend(["", "5. 產業與個股異常漲跌"])
+    lines.extend(["", "[產業與異常波動]"])
     if sector_up:
-        lines.append("強勢產業：" + "；".join(_sector_line(row) for row in sector_up[:3]))
+        lines.append("強勢產業：" + "；".join(compact_sector_line(row) for row in sector_up[:3]))
     if sector_down:
-        lines.append("弱勢產業：" + "；".join(_sector_line(row) for row in sector_down[:3]))
+        lines.append("弱勢產業：" + "；".join(compact_sector_line(row) for row in sector_down[:3]))
     if big_gainers:
-        lines.append("單日大漲：" + "；".join(_ticker_move(row) for row in big_gainers[:5]))
+        lines.append("大漲：" + "；".join(_ticker_move(row) for row in big_gainers[:5]))
     if big_losers:
-        lines.append("單日大跌：" + "；".join(_ticker_move(row) for row in big_losers[:5]))
+        lines.append("大跌：" + "；".join(_ticker_move(row) for row in big_losers[:5]))
     if not sector_up and not sector_down and not big_gainers and not big_losers:
         lines.append("沒有達到設定門檻的大漲跌或產業輪動。")
 
-    lines.extend(["", "6. 消息 / 新聞漏看檢查"])
+    lines.extend(["", "[新聞與消息]"])
     if news_items:
-        for item in news_items[:8]:
-            published = item.get("published_at") or "time n/a"
-            publisher = item.get("publisher") or "source n/a"
-            lines.append(f"{item.get('ticker')}｜{publisher}｜{published}｜{item.get('title')}")
+        for item in news_items[:5]:
+            lines.append(compact_news_line(item))
     else:
         requested = source_status.get("symbols_requested", 0)
         returned = source_status.get("symbols_returned", 0)
-        lines.append(f"免費新聞源沒有回傳可用標題｜requested {requested} / returned {returned}。重大消息仍需人工看券商/新聞 app。")
+        lines.append(f"免費新聞源沒有回傳可用標題｜returned {returned}/{requested}。")
 
-    lines.extend(["", "7. 期權檢查"])
-    lines.extend(options_summary_lines(options))
+    lines.extend(["", "[期權檢查]"])
+    lines.extend(options_summary_lines(options, compact=True))
 
-    lines.extend(["", "8. 明日行動清單"])
-    if missed_sells:
-        lines.append("先處理該賣/該減碼清單，再考慮任何新買進。")
-    if negative_cash:
-        if margin_status["can_add_margin"]:
-            lines.append("負現金仍在受控上限內；只允許 A 類小額融資，B 類仍等回檔且不用融資。")
-        else:
-            lines.append("負現金超過或不符合受控融資條件；候選股只做價格提醒和新聞追蹤。")
+    lines.extend(["", "[風控明日劇本]"])
+    lines.append(f"現金 {_money(portfolio.get('cash_value'))}｜股票 {_money(portfolio.get('stock_value'))}｜總權益 {_money(portfolio.get('total_equity'))}")
+    lines.append(margin_policy_line(margin_status))
+    if negative_cash and not margin_status["can_add_margin"]:
+        lines.append("明日：先減碼/降融資，再談新買進。")
     elif missed_buys:
-        lines.append("若隔日不跳空超過 no_chase_above，才允許第一筆試單。")
-    if missed_adds and not negative_cash:
-        lines.append("加碼只在回測支撐不破時做小筆，不追單日長紅。")
-    if not missed_sells and not missed_buys and not missed_adds:
-        lines.append("明天維持原持股與現金配置，等待更清楚訊號。")
-
-    lines.extend(["", "9. 最終一句話結論"])
-    if negative_cash:
-        if margin_status["can_add_margin"]:
-            lines.append("可保留小額融資彈性，但只能用在 A 類買點，不能用來追 B 類或補弱股。")
-        else:
-            lines.append("今天的覆盤重點不是多找股票，而是把融資降回受控上限內。")
-    elif missed_sells:
-        lines.append("明天優先處理風險部位，買進順位排在減碼之後。")
-    elif missed_buys or missed_adds:
-        lines.append("有可追蹤標的，但只能按價位與倉位規則分批，不追高。")
+        lines.append("明日：不跳空超過不追價，才允許第一筆試單。")
     else:
-        lines.append("盤後沒有足夠的新交易理由，維持紀律比硬交易重要。")
+        lines.append("明日：維持持股，等待更清楚訊號。")
 
     scope_note = review.get("scope_note")
     if scope_note:
-        lines.extend(["", "範圍提醒", f"- {scope_note}"])
+        lines.extend(["", "[範圍提醒]", f"- {clean_scope_note(scope_note)}"])
     if warnings:
-        lines.extend(["", "資料提醒"])
-        lines.extend(f"- {warning}" for warning in warnings[:5])
+        lines.extend(["", "[資料提醒]"])
+        lines.extend(f"- {clean_warning(warning)}" for warning in warnings[:4])
+    lines.append(f"\n產生方式：{provider_label(provider_status)}")
     return "\n".join(lines)
 
 
@@ -450,7 +395,159 @@ def _ticker_move(row: dict[str, Any]) -> str:
     return f"{row.get('ticker')} {_pct(row.get('return_1d'))}｜{row.get('sector', '')}"
 
 
-def options_summary_lines(options: dict[str, Any]) -> list[str]:
+def premarket_conclusion(
+    negative_cash: bool,
+    margin_status: dict[str, Any],
+    category_a: list[dict[str, Any]],
+    market_state: dict[str, Any],
+) -> str:
+    if negative_cash and margin_status.get("is_over_limit"):
+        return "不開新倉，先把融資降回上限內。"
+    if negative_cash and not margin_status.get("can_add_margin"):
+        return "現金為負且融資條件不符，今天只觀察。"
+    if category_a and market_state.get("risk_light") in {"green", "neutral"}:
+        return "可小買 A 類第一筆，但仍以持股風控優先。"
+    return "沒有 A 類買點，保留現金。"
+
+
+def after_close_conclusion(
+    negative_cash: bool,
+    margin_status: dict[str, Any],
+    missed_sells: list[dict[str, Any]],
+    missed_buys: list[dict[str, Any]],
+    missed_adds: list[dict[str, Any]],
+) -> str:
+    if missed_sells:
+        return "明天先處理該賣/該減碼，買進排後面。"
+    if negative_cash and not margin_status.get("can_add_margin"):
+        return "重點是降融資，不是增加新部位。"
+    if missed_buys or missed_adds:
+        return "有追蹤標的，但只能照價位分批，不追高。"
+    return "沒有新的強交易理由，維持紀律。"
+
+
+def market_chart_line(market_state: dict[str, Any]) -> str:
+    adv = int(_float_or_none(market_state.get("advancers")) or 0)
+    dec = int(_float_or_none(market_state.get("decliners")) or 0)
+    total = adv + dec
+    ratio = adv / total if total else 0.0
+    return (
+        f"廣度 {text_bar(ratio)} {_pct(ratio)}"
+        f"｜上漲 {adv} / 下跌 {dec}"
+        f"｜{market_state.get('market_day_type', 'n/a')} {risk_label(market_state.get('risk_light'))}"
+    )
+
+
+def ma50_chart_line(market_state: dict[str, Any]) -> str:
+    ratio = _float_or_none(market_state.get("above_ma50_ratio")) or 0.0
+    return f"MA50 {text_bar(ratio)} {_pct(ratio)}｜20日新高 {market_state.get('new_20d_high_count', 0)}"
+
+
+def cash_chart_line(portfolio: dict[str, Any], market_state: dict[str, Any], margin_status: dict[str, Any]) -> str:
+    cash_weight = _float_or_none(portfolio.get("cash_weight"))
+    current_margin = _float_or_none(margin_status.get("current_margin_weight")) or 0.0
+    max_margin = _float_or_none(margin_status.get("max_negative_cash_weight")) or 0.0
+    margin_ratio = current_margin / max_margin if max_margin > 0 else 0.0
+    if cash_weight is not None and cash_weight >= 0:
+        return f"現金 {_pct(cash_weight)}｜目標 {market_state.get('cash_target', 'n/a')}"
+    return (
+        f"融資 {text_bar(min(margin_ratio, 1.0))} {_pct(current_margin)} / 上限 {_pct(max_margin)}"
+        f"｜{margin_status.get('short_note', '')}"
+    )
+
+
+def compact_holdings_table(holdings: list[dict[str, Any]]) -> list[str]:
+    lines = ["代號｜動作｜權重｜損益｜停損"]
+    for row in holdings:
+        lines.append(
+            f"{row.get('ticker')}｜{short_text(row.get('action'), 8)}｜{_pct(row.get('portfolio_weight'))}"
+            f"｜{_pct(row.get('unrealized_pnl_pct'))}｜{_price(row.get('stop_loss'))}"
+        )
+    return lines
+
+
+def compact_holding_action(row: dict[str, Any]) -> str:
+    sell_pct = _float_or_none(row.get("suggested_sell_pct")) or 0.0
+    action = str(row.get("action") or "處理")
+    action_text = f"{action}{_pct(sell_pct)}" if sell_pct > 0 else action
+    return f"{row.get('ticker')} {action_text}｜停損 {_price(row.get('stop_loss'))}"
+
+
+def compact_candidate(row: dict[str, Any], prefix: str = "觀察", suffix: str = "") -> str:
+    label = f"{prefix}｜" if prefix else ""
+    return (
+        f"{label}{row.get('ticker')} {row.get('category', '')} 分數 {_num(row.get('total_score_100'))}"
+        f"｜進場 {_price(row.get('entry_low'))}-{_price(row.get('entry_high'))}"
+        f"｜不追 {_price(row.get('no_chase_above'))}{suffix}"
+    )
+
+
+def compact_sector_line(row: dict[str, Any]) -> str:
+    sector = short_text(row.get("sector"), 14)
+    return f"{sector} 1D {_pct(row.get('avg_return_1d'))}｜代表 {row.get('top_mover', '')}"
+
+
+def compact_news_line(item: dict[str, Any]) -> str:
+    ticker = item.get("ticker") or "n/a"
+    publisher = short_text(item.get("publisher"), 12)
+    title = short_text(item.get("title"), 72)
+    return f"{ticker}｜{publisher}｜{title}"
+
+
+def text_bar(value: Any, width: int = 10) -> str:
+    parsed = _float_or_none(value)
+    if parsed is None:
+        return "░" * width
+    bounded = min(max(parsed, 0.0), 1.0)
+    filled = int(round(bounded * width))
+    return "█" * filled + "░" * (width - filled)
+
+
+def risk_label(value: Any) -> str:
+    labels = {
+        "green": "綠燈",
+        "neutral": "中性",
+        "yellow": "黃燈",
+        "orange": "橘燈",
+        "red": "紅燈",
+    }
+    return labels.get(str(value), str(value or "n/a"))
+
+
+def short_text(value: Any, max_chars: int = 30) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) <= max_chars:
+        return text
+    return text[: max(1, max_chars - 1)] + "…"
+
+
+def clean_warning(value: Any) -> str:
+    text = str(value)
+    replacements = {
+        "Cash balance is negative after margin balance; apply controlled margin policy before any new buy.": "現金為負；新增買進需先符合受控融資規則。",
+        "CASH row exists but cash value is zero; fill shares with available USD cash.": "CASH 為 0；請更新可用美元現金。",
+    }
+    return replacements.get(text, text)
+
+
+def clean_scope_note(value: Any) -> str:
+    text = str(value)
+    replacements = {
+        "Review is based on configured universe plus current holdings, not every US-listed stock.": "覆盤根據專案 universe 與目前持股；不是即時逐筆新聞或完整 options flow。",
+    }
+    return replacements.get(text, text)
+
+
+def provider_label(value: Any) -> str:
+    text = str(value)
+    if text == "ai_disabled":
+        return "本地規則，未呼叫 OpenAI API"
+    if text == "non_trading_day":
+        return "美股休市檢查"
+    return text
+
+
+def options_summary_lines(options: dict[str, Any], compact: bool = False) -> list[str]:
     if not isinstance(options, dict) or not options.get("enabled"):
         return ["期權檢查未啟用。"]
 
@@ -461,19 +558,31 @@ def options_summary_lines(options: dict[str, Any]) -> list[str]:
     lines: list[str] = []
 
     if bullish:
-        lines.append("偏多確認：" + "；".join(_option_line(row) for row in bullish[:4]))
+        formatter = compact_option_line if compact else _option_line
+        lines.append("偏多：" + "；".join(formatter(row) for row in bullish[:4]))
     if bearish:
-        lines.append("偏空警訊：" + "；".join(_option_line(row) for row in bearish[:4]))
+        formatter = compact_option_line if compact else _option_line
+        lines.append("偏空：" + "；".join(formatter(row) for row in bearish[:4]))
     if high_iv:
-        lines.append("IV 偏高勿追：" + "；".join(_option_iv_line(row) for row in high_iv[:4]))
+        lines.append("IV 高：" + "；".join(_option_iv_line(row) for row in high_iv[:4]))
     if not lines:
         requested = status.get("symbols_requested", 0)
         returned = status.get("symbols_returned", 0)
-        lines.append(f"未出現明確期權偏多/偏空確認｜checked {returned}/{requested} 檔。")
+        lines.append(f"未出現明確偏多/偏空｜已查 {returned}/{requested} 檔。")
     note = options.get("scope_note")
     if note:
-        lines.append(f"範圍：{note}")
+        lines.append("範圍：非全市場 options flow。")
     return lines
+
+
+def compact_option_line(row: dict[str, Any]) -> str:
+    side = row.get("strongest_contract_side") or "n/a"
+    strike = _price(row.get("strongest_contract_strike"))
+    return (
+        f"{row.get('ticker')} C/P {_num(row.get('call_put_volume_ratio'))}"
+        f"｜IV {_pct(row.get('avg_near_atm_iv'))}"
+        f"｜最大量 {side} {strike}"
+    )
 
 
 def _option_line(row: dict[str, Any]) -> str:

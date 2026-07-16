@@ -46,6 +46,8 @@ OPENAI_REASONING_EFFORT=xhigh
 
 `data/holdings.csv` 的現金列用 `ticker=CASH`、`asset_type=cash`，`shares` 填美元現金金額。
 
+可選：把當天實際交易放到 `data/trades.csv`，盤後覆盤會顯示今日買進/賣出/換倉摘要。格式可參考 `data/trades.example.csv`。
+
 ## Margin policy
 
 融資不是絕對禁止，但預設只允許受控使用：

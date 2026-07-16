@@ -8,6 +8,7 @@ outputs/
 data/price_cache/
 data/raw/
 data/holdings.csv
+data/trades.csv
 data/watchlist_next_day.csv
 data/inbox/firstrade/*
 !data/inbox/firstrade/README.md

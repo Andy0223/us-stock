@@ -75,7 +75,8 @@ def build_prompt(strategy_text: str, context: dict[str, Any], mode: str) -> str:
         "8. options_review 是免費 yfinance 期權鏈摘要，只能當確認/警訊，不能當成完整 options flow 或內線訊號。\n"
         "9. closed_loop 來自歷史 event study 因子與每日 scan 的閉環雷達；可用於排序與提醒，但不得跳過風控或把高波動事件型當成穩健買點。\n"
         "10. earnings_calendar 來自 AlphaLab 公開財報日曆，只能當財報風險與催化提醒；日期可能變動，不得把財報前事件直接當成買進理由。\n"
-        "11. 不得使用保證獲利、必漲、一定會漲、無風險等字眼。\n\n"
+        "11. trade_log 是手動/券商匯出的實際交易紀錄，只能用來檢討今天做了什麼，不能取代策略訊號。\n"
+        "12. 不得使用保證獲利、必漲、一定會漲、無風險等字眼。\n\n"
         f"JSON context:\n{context_json}"
     )
 
@@ -296,6 +297,7 @@ def fallback_after_close_report(context: dict[str, Any], provider_status: str) -
     watchlist_created = context.get("watchlist_created", {})
     closed_loop = context.get("closed_loop", {})
     earnings = context.get("earnings_calendar", {})
+    trade_log = context.get("trade_log", {})
     warnings = context.get("warnings", [])
 
     missed_buys = review.get("missed_buy_candidates", []) or []
@@ -320,6 +322,9 @@ def fallback_after_close_report(context: dict[str, Any], provider_status: str) -
         ma50_chart_line(market_state),
         cash_chart_line(portfolio, market_state, margin_status),
     ]
+
+    lines.extend(["", "[今日實際交易]"])
+    lines.extend(trade_log_lines(trade_log))
 
     lines.extend(["", "[明日優先順序]"])
     if missed_sells:
@@ -419,6 +424,61 @@ def _sector_line(row: dict[str, Any]) -> str:
 
 def _ticker_move(row: dict[str, Any]) -> str:
     return f"{row.get('ticker')} {_pct(row.get('return_1d'))}｜{row.get('sector', '')}"
+
+
+def trade_log_lines(trade_log: dict[str, Any]) -> list[str]:
+    if not isinstance(trade_log, dict) or not trade_log:
+        return ["尚未載入交易紀錄；覆盤只看持股快照。"]
+    status = trade_log.get("source_status", {}) if isinstance(trade_log.get("source_status"), dict) else {}
+    if status.get("status") == "missing":
+        return ["尚未提供 data/trades.csv；覆盤只看持股快照。"]
+    rows = trade_log.get("rows", []) or []
+    if not rows:
+        message = f"{trade_log.get('as_of', '')} 沒有交易紀錄。".strip()
+        return [message or "今日沒有交易紀錄。"]
+
+    lines = [
+        f"買進 {_money(trade_log.get('buy_value'))}｜賣出 {_money(trade_log.get('sell_value'))}｜淨現金流 {_money(trade_log.get('net_cash_flow'))}"
+    ]
+    buys = aggregate_trade_rows(rows, "buy")
+    sells = aggregate_trade_rows(rows, "sell")
+    round_trips = trade_log.get("round_trip_symbols", []) or []
+    if buys:
+        lines.append("買進：" + "；".join(format_trade_item(item) for item in buys[:8]))
+    if sells:
+        lines.append("賣出：" + "；".join(format_trade_item(item) for item in sells[:8]))
+    if round_trips:
+        lines.append("當日來回/換倉：" + "、".join(str(symbol) for symbol in round_trips[:8]))
+    return lines
+
+
+def aggregate_trade_rows(rows: list[dict[str, Any]], side: str) -> list[dict[str, Any]]:
+    grouped: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if str(row.get("side", "")).lower() != side:
+            continue
+        ticker = str(row.get("ticker", "")).upper()
+        if not ticker:
+            continue
+        shares = abs(_float_or_none(row.get("shares")) or 0.0)
+        amount = abs(_float_or_none(row.get("amount")) or 0.0)
+        item = grouped.setdefault(ticker, {"ticker": ticker, "shares": 0.0, "amount": 0.0})
+        item["shares"] += shares
+        item["amount"] += amount
+
+    result = []
+    for item in grouped.values():
+        shares = _float_or_none(item.get("shares")) or 0.0
+        amount = _float_or_none(item.get("amount")) or 0.0
+        item["avg_price"] = amount / shares if shares > 0 else math.nan
+        result.append(item)
+    return sorted(result, key=lambda item: _float_or_none(item.get("amount")) or 0.0, reverse=True)
+
+
+def format_trade_item(item: dict[str, Any]) -> str:
+    shares = _float_or_none(item.get("shares")) or 0.0
+    share_text = str(int(shares)) if shares.is_integer() else _num(shares)
+    return f"{item.get('ticker')} {share_text}@{_price(item.get('avg_price'))}"
 
 
 def premarket_conclusion(

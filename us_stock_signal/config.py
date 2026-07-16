@@ -9,6 +9,10 @@ from typing import Any
 DEFAULT_CONFIG: dict[str, Any] = {
     "universe_path": "data/universe_us_all.csv",
     "holdings_path": "data/holdings.csv",
+    "trade_log": {
+        "enabled": True,
+        "path": "data/trades.csv",
+    },
     "strategy_prompt_path": "prompts/us_swing_strategy.md",
     "output_dir": "outputs",
     "mode": "premarket",

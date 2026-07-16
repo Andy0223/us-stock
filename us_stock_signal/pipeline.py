@@ -17,6 +17,7 @@ from .notify import send_telegram_message
 from .options import collect_options_review
 from .scanner import ScanResult, run_scan, scan_to_context
 from .strategy import StrategyReport, generate_strategy_report, sanitize_for_json
+from .trades import load_trade_log
 from .watchlist import build_next_day_watchlist, evaluate_watchlist, load_active_watchlist, write_watchlist
 
 
@@ -96,6 +97,10 @@ def run_pipeline(
         "is_trading_day": is_us_trading_day(run_date),
         "is_early_close": is_us_early_close(run_date),
     }
+    trade_cfg = dict(config.get("trade_log", {}))
+    if bool(trade_cfg.get("enabled", True)):
+        trade_path = resolve_path(trade_cfg.get("path", "data/trades.csv"), config_dir)
+        context["trade_log"] = load_trade_log(trade_path, run_date)
     watchlist_cfg = dict(config.get("watchlist", {}))
     watchlist_path = resolve_path(watchlist_cfg.get("path", "data/watchlist_next_day.csv"), config_dir)
     active_watchlist = load_active_watchlist(watchlist_path, run_date)
